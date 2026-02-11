@@ -19,25 +19,36 @@ Clone this repo alongside your projects:
 git clone git@github.com:fernandezdiegoh/df-claude-skills.git
 ```
 
-### Option A: Symlinks (recommended)
+### Option A: Sync script (recommended)
 
-Create symlinks from your project to the cloned repo. Updates via `git pull` are picked up automatically:
+Add a sync script to your project that copies skills from the cloned repo. Claude Code does not follow symlinks for skill discovery, so copies are required.
+
+Example `scripts/sync-skills.sh`:
 
 ```bash
-ln -s <path-to>/df-claude-skills/skills/<skill-name> <your-project>/.claude/skills/<skill-name>
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+SKILLS_REPO="<path-to>/df-claude-skills/skills"
+
+rm -rf .claude/skills/*
+cp -r "$SKILLS_REPO"/* .claude/skills/
+
+echo "Skills synced. Restart Claude Code to pick up changes."
 ```
 
-Or all at once:
+Then add `.claude/skills/` to your project's `.gitignore` — skills are local copies, not committed to the repo.
+
+After cloning or updating skills:
 
 ```bash
-for skill in <path-to>/df-claude-skills/skills/*/; do
-  ln -s "$skill" <your-project>/.claude/skills/$(basename "$skill")
-done
+./scripts/sync-skills.sh
 ```
 
 ### Option B: --add-dir flag
 
-Launch Claude Code with the repo as an additional directory. Skills are loaded automatically with live change detection:
+Launch Claude Code with the repo as an additional directory:
 
 ```bash
 claude --add-dir <path-to>/df-claude-skills
@@ -45,13 +56,19 @@ claude --add-dir <path-to>/df-claude-skills
 
 Note: this flag must be passed every time you launch Claude Code.
 
-### Option C: Copy (no auto-updates)
+### Option C: Manual copy
 
-Copy skills into your project. You'll need to re-copy after each update:
+Copy skills into your project manually:
 
 ```bash
-cp -r <path-to>/df-claude-skills/skills/<skill-name> <your-project>/.claude/skills/
+cp -r <path-to>/df-claude-skills/skills/* <your-project>/.claude/skills/
 ```
+
+## Updating skills
+
+1. Edit skills in this repo, commit, push
+2. In each project: `git pull` the skills repo, then run `./scripts/sync-skills.sh`
+3. Restart Claude Code to pick up changes
 
 ## Usage
 
