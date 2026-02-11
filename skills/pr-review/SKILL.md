@@ -1,7 +1,7 @@
 ---
 name: pr-review
 description: Rigorous PR review optimized for LLM-generated code. Assumes problems exist until proven otherwise.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Prompt: Claude Code Reviewer para Pull Requests
@@ -99,7 +99,29 @@ Revisá cada archivo modificado evaluando las siguientes dimensiones:
 - ¿El estilo de código es consistente (naming conventions, estructura de archivos, patrones de error)?
 - ¿Modifica archivos compartidos o de configuración que podrían afectar otros módulos?
 
-#### 2.9 Documentación
+#### 2.9 React / Next.js Performance (solo para PRs que tocan frontend)
+
+**Waterfalls (CRITICAL)**
+- ¿Hay `await` secuenciales que podrían ser paralelos con `Promise.all()`?
+- ¿Hay data fetching en componentes anidados que crea request waterfalls? (padre espera → hijo fetcha → nieto fetcha)
+- ¿Se podría usar Suspense boundaries para streamear contenido independiente?
+
+**Bundle size (CRITICAL)**
+- ¿Hay barrel imports (`import { X } from '@/components'`) que deberían ser directos (`import X from '@/components/X'`)?
+- ¿Hay componentes pesados (charts, editors, modals) que deberían usar `next/dynamic` con lazy loading?
+- ¿Se cargan librerías de terceros (analytics, logging) que podrían deferirse post-hydration?
+
+**Re-renders (MEDIUM)**
+- ¿Hay componentes que se suscriben a estado que solo usan en callbacks? (deberían usar refs)
+- ¿Hay cálculos caros dentro del render que deberían estar en `useMemo` o extraídos a un componente memoizado?
+- ¿Se pasan objetos/arrays nuevos en cada render como props? (`style={{...}}`, `options={[...]}`)
+- ¿Se usa `useState(expensiveComputation())` en vez de `useState(() => expensiveComputation())`?
+
+**Server components (Next.js 15+)**
+- ¿Se minimiza la data serializada de server a client components?
+- ¿Se usa `"use client"` solo donde es necesario, o se marcó un componente entero cuando solo una parte necesita interactividad?
+
+#### 2.10 Documentación
 - ¿Los cambios en APIs públicas están documentados?
 - ¿Hay comentarios que explican "por qué" donde la lógica no es obvia?
 - Marcá comentarios inútiles tipo `// initialize variable`, `// return result`, `// handle error` para eliminar.

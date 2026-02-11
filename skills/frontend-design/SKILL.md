@@ -40,3 +40,26 @@ Interpret creatively and make unexpected choices that feel genuinely designed fo
 **IMPORTANT**: Match implementation complexity to the aesthetic vision. Maximalist designs need elaborate code with extensive animations and effects. Minimalist or refined designs need restraint, precision, and careful attention to spacing, typography, and subtle details. Elegance comes from executing the vision well.
 
 Remember: Claude is capable of extraordinary creative work. Don't hold back, show what can truly be created when thinking outside the box and committing fully to a distinctive vision.
+
+## Performance-Aware Design
+
+Beautiful UI means nothing if it's slow. Apply these principles during design:
+
+**Component architecture for code-splitting**
+- Design components with clear boundaries so heavy sections (charts, editors, rich modals) can be lazy-loaded with `next/dynamic`
+- Place `"use client"` boundaries strategically — keep the interactive island small, let the rest be server-rendered
+
+**Data fetching without waterfalls**
+- Design layouts where independent sections can fetch in parallel, not sequentially
+- Use Suspense boundaries to stream sections independently — design loading skeletons for each boundary
+- Fetch data as early as possible (server components, layout-level), not deep in the component tree
+
+**Bundle-conscious choices**
+- Prefer CSS animations over JS animation libraries when possible
+- Avoid barrel exports (`index.ts` that re-exports everything) — import components directly
+- Heavy third-party dependencies (date pickers, rich text editors, charting) should be dynamically imported
+
+**Render efficiency**
+- Hoist static JSX, objects, and arrays outside components — don't recreate them on every render
+- Design state so components subscribe only to what they display, not entire stores
+- For lists and grids, consider `content-visibility: auto` for off-screen performance
