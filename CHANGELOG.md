@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### documentation-expert v2.0.0
+- Full rewrite from generic template to comprehensive documentation skill
+- Added modes: audit, create, improve, full (default)
+- Added 9 documentation types (README, architecture, API, feature, guide, ADR, runbook, CHANGELOG, CLAUDE.md)
+- Added 4-phase process: audit existing docs, detect anti-patterns, write/improve, validate
+- Added automated checks (stale docs, broken links, outdated code references)
+- Added LLM filler detection (paraphrased code, generic sections, empty overviews)
+- Added writing rules (8 principles: lead with action, code over prose, one source of truth, etc.)
+- Added templates for README, feature doc, and ADR
+- Added validation checklist
+- Added structured audit output format with documentation map
+
 ### pr-review v1.3.0
 - Translated to English
 
