@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### pr-review v1.3.0
+- Translated to English
+
+### templates
+- Added SKILL-TEMPLATE.md for creating new skills
+- Added README-TEMPLATE.md for skill READMEs
+
 ### codebase-audit v3.1.0
 - Translated to English
 - Added scoping (security/architecture/quality/devex/backend/frontend/module)
