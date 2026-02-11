@@ -8,7 +8,6 @@ Skills personalizadas para Claude Code. Optimizadas para detectar patrones de co
 |-------|-------------|---------|
 | `pr-review` | Review riguroso de PRs, asume que hay problemas hasta demostrar lo contrario | 2.0.0 |
 | `codebase-audit` | Auditoria completa — arquitectura, seguridad, deuda tecnica, roadmap de remediacion | 2.0.0 |
-| `code-review` | Code review general para seguridad, performance y convenciones | 1.0.0 |
 | `documentation-expert` | Creacion y mantenimiento de documentacion tecnica | 1.0.0 |
 | `frontend-design` | Interfaces frontend distintivas y production-grade | 1.0.0 |
 
