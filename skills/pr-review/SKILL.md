@@ -2,6 +2,8 @@
 name: pr-review
 description: Rigorous PR review optimized for LLM-generated code. Assumes problems exist until proven otherwise.
 version: 1.3.0
+language: en
+category: review
 ---
 
 # Prompt: Claude Code Reviewer for Pull Requests

@@ -2,6 +2,8 @@
 name: skill-name
 description: One-line description of what the skill does.
 version: 1.0.0
+language: en
+category: review | audit | design | docs
 ---
 
 # Prompt: [Skill Display Name]

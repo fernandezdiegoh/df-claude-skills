@@ -2,6 +2,8 @@
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
 version: 3.1.0
+language: en
+category: audit
 ---
 
 # Prompt: Claude Codebase Auditor
