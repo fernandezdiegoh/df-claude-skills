@@ -6,10 +6,10 @@ Custom skills for Claude Code. Optimized to detect patterns in LLM-generated cod
 
 | Skill | Description | Version |
 |-------|-------------|---------|
-| `pr-review` | Rigorous PR review, assumes problems exist until proven otherwise | 1.2.0 |
-| `codebase-audit` | Full audit — architecture, security, tech debt, remediation roadmap | 2.0.0 |
-| `documentation-expert` | Technical documentation creation and maintenance | 1.0.0 |
-| `frontend-design` | Distinctive, production-grade frontend interfaces | 1.0.0 |
+| [`codebase-audit`](skills/codebase-audit/) | Full audit — architecture, security, tech debt, remediation roadmap | 3.1.0 |
+| [`pr-review`](skills/pr-review/) | Rigorous PR review, assumes problems exist until proven otherwise | 1.2.0 |
+| [`frontend-design`](skills/frontend-design/) | Distinctive, production-grade frontend interfaces | 1.0.0 |
+| [`documentation-expert`](skills/documentation-expert/) | Technical documentation creation and maintenance | 1.0.0 |
 
 ## Installation
 
@@ -21,30 +21,23 @@ git clone git@github.com:fernandezdiegoh/df-claude-skills.git
 
 ### Option A: Sync script (recommended)
 
-Add a sync script to your project that copies skills from the cloned repo. Claude Code does not follow symlinks for skill discovery, so copies are required.
+Claude Code does not follow symlinks for skill discovery, so copies are required. This repo includes a sync script that handles this.
 
-Example `scripts/sync-skills.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
-
-SKILLS_REPO="<path-to>/df-claude-skills/skills"
-
-rm -rf .claude/skills/*
-cp -r "$SKILLS_REPO"/* .claude/skills/
-
-echo "Skills synced. Restart Claude Code to pick up changes."
-```
-
-Then add `.claude/skills/` to your project's `.gitignore` — skills are local copies, not committed to the repo.
-
-After cloning or updating skills:
+From your target project's root:
 
 ```bash
-./scripts/sync-skills.sh
+<path-to>/df-claude-skills/scripts/sync-skills.sh
 ```
+
+Or sync to a specific project:
+
+```bash
+<path-to>/df-claude-skills/scripts/sync-skills.sh /path/to/my-project
+```
+
+The script copies all skills to `.claude/skills/`, stripping READMEs and examples that Claude doesn't need.
+
+Add `.claude/skills/` to your project's `.gitignore` — skills are local copies, not committed to the target repo.
 
 ### Option B: --add-dir flag
 
