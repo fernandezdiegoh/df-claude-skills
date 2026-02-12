@@ -81,7 +81,7 @@ All other sections of this skill (Steps 1–3, dimensions, exit checklist) apply
 - Use **`gh` CLI** for GitHub operations (PR metadata, diff, posting reviews)
 - Fall back to bash only for operations that require shell execution (e.g., `git log`)
 
-**If `gh` CLI is not available or not authenticated**, fall back to `git diff <base>..HEAD` for the diff and skip Step 4. Inform the user that GitHub integration is unavailable.
+**If `gh` CLI is not available, not authenticated, or fails with a network/timeout error**, fall back to `git diff <base>..HEAD` for the diff and skip Step 4. Inform the user that GitHub integration is unavailable. Do not retry failed `gh` commands more than once — fall back immediately to git.
 
 The bash examples in this skill are provided as reference for what to check, not as literal commands to run.
 
@@ -96,7 +96,7 @@ Before looking at the code:
 1. **Parse scope and flags**: Determine if the user specified a scope filter or `--team`. Default to `full` scope, standalone mode.
 2. **Resolve PR number**: If no PR number was provided, auto-detect from the current branch: `gh pr list --head $(git branch --show-current) --json number --jq '.[0].number'`. If no PR is found, ask the user for the number or fall back to reviewing the current branch diff against the base.
 3. **Gather PR metadata**: Run `gh pr view <number> --json title,body,files,commits,additions,deletions,baseRefName,headRefName,isDraft` to get PR metadata. Count files and commits to determine if multi-commit or large PR strategies apply. If the PR is in **draft state**, note it in the progress line and adjust tone: label blockers as "will block merge" rather than "must fix now". The review is still rigorous — draft does not mean lenient. If the PR references linked issues (`Closes #X`, `Fixes #X`), note them and verify in Step 2 that the PR actually resolves them.
-4. **Get the diff**: Use `gh pr diff <number>` to obtain the full diff. Alternatively, read changed files directly with the Read tool after identifying them from the PR metadata. If `gh` is unavailable, fall back to `git diff <base>..HEAD`.
+4. **Get the diff**: Use `gh pr diff <number>` to obtain the full diff. Alternatively, read changed files directly with the Read tool after identifying them from the PR metadata. If `gh` is unavailable or failed in step 3, fall back to `git diff <base>..HEAD`. **Do not call steps 3 and 4 in parallel** — if step 3 fails, step 4 needs to know to use the git fallback.
 5. **Read project rules**: If the project has a `CLAUDE.md` or `.claude/` directory, read it to understand project-specific conventions, gate policies, and review criteria. These rules supplement (and may override) the default dimensions.
 6. **Answer these questions**:
    - What is the stated goal of the PR?
