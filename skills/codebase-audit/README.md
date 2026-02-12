@@ -69,6 +69,7 @@ Lightweight verification (~5-10 min) that checks whether existing findings have 
 
 | Version | Changes |
 |---------|---------|
+| 3.6.0 | Quick scope, simplified bus factor, subagent failure handling, duration metrics, improved docstring regex, nested fence fix, Phase 3.7 merged into Phase 3 subagent, date-based issue temp dirs |
 | 3.5.0 | License compliance, secret scanning tools, issue dedup, reconcile file handling, dep pinning, maturity rubric, critical file definition, bus factor improvements, LOC-based time estimates, WORSENED highlighting, body-file issues, all-severity issue creation |
 | 3.4.1 | Fixed regex alternation syntax (BRE → ripgrep) |
 | 3.4.0 | Tool preference section, Phase 4.1 as table, Phase 1 reads CLAUDE.md, parallelization improved, Phase 0 fallback, reconcile snapshots, checkpoint .gitignore, stale code fix, large repos guidance, imperative exit checklist |

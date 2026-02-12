@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.5.0
+version: 3.6.0
 language: en
 category: audit
 ---
@@ -33,10 +33,13 @@ By default, the audit is **full** (all phases, entire codebase). If the user spe
 | `backend` | All, filtered to backend/ | Backend files only |
 | `frontend` | All, filtered to frontend/ | Frontend files only |
 | `module:<path>` | All, filtered to path | Audit a specific directory |
+| `quick` | 0 only | Phase 0 + top 5 findings + grade (~5 min triage) |
 
-**Note:** Phase 0 (automated checks) always runs against the entire project, regardless of scope. Linters, type checkers, and test suites need the full context to produce reliable results.
+**Note:** Phase 0 (automated checks) always runs against the entire project, regardless of scope — linters, type checkers, and test suites need the full context.
 
-**`module:<path>` scope:** All phases run but filtered to the specified path. Phase 0 still runs against the full project (tools need full context). Subagents receive the path filter and only analyze files within it.
+**`module:<path>` scope:** All phases run but filtered to the specified path. Phase 0 still runs full. Subagents receive the path filter and only analyze files within it.
+
+**`quick` scope:** Run Phase 0 only, then summarize the top 5 most impactful findings and assign a grade. Useful for triage — deciding whether a full audit is warranted.
 
 When the scope is partial, the report must state it clearly. For sections not applicable to the project (e.g., 2.6 if no Docker, 3.5 if no DB, 3.7 if no frontend), include an explicit skip line:
 
@@ -71,6 +74,8 @@ A full audit is context-intensive and time-consuming. Approximate times by codeb
 | 10k–50k LOC | ~25 min | ~10 min |
 | > 50k LOC | ~40 min | ~15 min |
 
+These times assume a fast model (Claude Opus/Sonnet) with low API latency. Actual duration varies with model speed and codebase complexity.
+
 To maintain quality across all phases:
 
 ### Subagents (parallelization)
@@ -79,13 +84,17 @@ Use the **Task tool** to delegate independent phases to subagents working in par
 
 ```
 Group 1 (parallel): Phase 0 (automated checks) + Phase 1 (reconnaissance) + Phase 2 (security)
-Group 2 (parallel): Phase 3 (architecture) + Phase 3.7 (frontend)
-Group 3 (sequential): Phase 4 (quality) — needs Phase 0 results
-Group 4 (parallel): Phase 5 (operability) + Phase 6 (tech debt)
+  → WAIT for ALL three to complete before proceeding
+Group 2 (parallel): Phase 3 (architecture, includes 3.7 frontend) + Phase 4 (quality) + Phase 5 (operability) + Phase 6 (tech debt)
+  → WAIT for ALL to complete before proceeding
 Final (sequential): Report consolidation + Phase 7 (issues)
 ```
 
-Phase 2 (security) analyzes code directly and can start immediately without waiting for Phase 0 or Phase 1. However, Phase 2.5 (attack surface — dependency vulnerabilities) should consolidate its results with Phase 0's dependency audit data once available.
+**CRITICAL: Do NOT start report consolidation until every subagent has completed.** Read each Task Output and confirm completion. If a subagent is still running, wait for it. A premature report will be missing findings.
+
+**Phase 2.5 consolidation:** Phase 2's dependency vulnerability findings (2.5) overlap with Phase 0's dep audit. Consolidate both into a single section during report writing — don't duplicate findings.
+
+**Subagent failures:** If a subagent errors or produces no results, note it as SKIPPED with the error. Don't let one failed subagent block the rest. Re-run it once if the error seems transient (timeout, network). If it fails again, proceed without it and note the gap in the report.
 
 When spawning subagents, use descriptive names and descriptions so progress is readable:
 
@@ -95,17 +104,29 @@ Task(name="phase-1-reconnaissance",   description="Map structure, deps, git hist
 Task(name="phase-2-security",         description="Audit secrets, auth, inputs, CORS", ...)
 ```
 
-Each subagent must return findings in a structured format (severity, location, problem, impact, remediation) so the final report can consolidate them.
+**Context management:** Subagent results can be very large. To prevent context window overflow and compaction mid-audit, each subagent must **write its findings to a file** instead of returning them in-context:
 
-**Progress updates:** After each subagent completes, print a brief progress line to the user so they can track what finished:
+```
+/tmp/audit-phase-0.md   # Phase 0 results
+/tmp/audit-phase-1.md   # Phase 1 results
+/tmp/audit-phase-2.md   # Phase 2 results
+...
+```
+
+Each subagent writes its findings in structured format (severity, location, problem, impact, remediation) to its file, then returns only a **one-line summary** (e.g., "Phase 2 complete — 0 critical, 3 medium findings. Results in /tmp/audit-phase-2.md").
+
+The main agent reads these files during the consolidation phase. This keeps the main context clean and avoids compaction losing subagent results.
+
+**MANDATORY progress updates:** Every time you receive a subagent result, you MUST immediately output a progress line to the user BEFORE doing anything else. This is critical for UX — the user cannot see subagent details, only your output. Format:
 
 ```
 ✓ Phase 0 complete — 0 lint errors, 631 tests passing, 1 vuln dep
 ✓ Phase 1 complete — 39k LOC, 5 hotspots, bus factor OK
 ✓ Phase 2 complete — 0 critical, 2 medium (error leaks)
+⏳ Launching Group 2: Phase 3 + Phase 4...
 ```
 
-This compensates for the opaque task IDs in the Claude Code UI.
+Do NOT silently collect results. The user sees opaque task IDs — your progress lines are the only way they know what's happening.
 
 ### Intermediate checkpoints
 
@@ -184,7 +205,7 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
    - If the file no longer exists, check for renames (`git log --follow --diff-filter=R -- <old-path>`). If deleted, mark as RESOLVED with note "file removed". If renamed, update the location and continue verification at the new path.
    - Check if the reported problem still exists
    - Determine status: `RESOLVED`, `PERSISTS`, `IMPROVED`, `WORSENED`
-   - For RESOLVED: verify the fix is correct, not just that the code changed
+   - For RESOLVED: verify the fix is correct, not just that the code changed. Read the new code and confirm it addresses the root cause — a refactored function that still has the same vulnerability is not resolved.
 
 4. **Update the report.** In `docs/audits/latest.md`:
    - Mark resolved findings with ~~strikethrough~~ and `RESOLVED`
@@ -292,17 +313,16 @@ Map the project before analyzing code:
 # Hotspots: files with the most changes (last 3 months)
 git log --since="3 months ago" --pretty=format: --name-only | grep -v '^$' | sort | uniq -c | sort -rn | head -20
 
-# Bus factor: unique HUMAN contributors to critical files
-# Exclude AI-assisted commits — bus factor measures human knowledge
-git log --pretty=format:"%H %an" -- <critical-file> | while read hash author; do
-  git log -1 --format="%b" "$hash" | grep -iq "co-authored-by:.*\(claude\|copilot\|cursor\|anthropic\|openai\|ai\)" || echo "$author"
-done | sort -u | wc -l
+# Bus factor: unique contributors to critical files
+git log --pretty=format:"%an" -- <critical-file> | sort -u | wc -l
+# NOTE: If AI-assisted commits use Co-Authored-By, consider excluding them for a human-only count
 
 # Large commits without review (possible LLM dumps)
 git log --oneline --shortstat | head -40
 
 # Stale code: tracked files nobody modified in 6+ months
 comm -23 <(git ls-files | sort) <(git log --since="6 months ago" --pretty=format: --name-only | grep -v '^$' | sort -u) | head -30
+# NOTE: Can be slow for repos with >50k tracked files. Alternative: compare git ls-files against git log --diff-filter=M output
 ```
 
 Analyze:
@@ -428,7 +448,7 @@ Use **Grep** and **Glob** tools (not bash `grep`/`find`) for these checks. Searc
 | Abandoned placeholders (JS/TS) | `// TODO|// FIXME|// HACK|console\.log|throw new Error.*(not implemented|todo)` | `*.{ts,tsx,js}` |
 | Over-engineering patterns | Use **Glob** for files matching `**/*Factory*`, `**/*Strategy*`, `**/*Adapter*`, `**/*Builder*`, `**/*Abstract*` | Exclude `node_modules`, `__pycache__` |
 | Empty or trivial tests | `toBeTruthy|toBeDefined|toBeUndefined|assertIsNotNone|assert.*is not None$|expect\(true\)` | `*.{py,ts,tsx}` in `tests/` |
-| Bloated docstrings | `"""[A-Z]` (review first ~30 matches with context) | `*.py` |
+| Bloated docstrings | `"""\s*(This\|The\|A)\s+(function\|method\|class\|module)` (review first ~30 matches with context) | `*.py` |
 | Phantom dependencies | Compare imports against `requirements.txt` / `package.json` manually | — |
 
 **Manual analysis after the checks:**
@@ -535,22 +555,25 @@ Each issue must be **self-contained** — someone (or an agent) should be able t
 **Method:** Use the **Write** tool to create a temp file with the issue body, then `gh issue create --body-file`. This avoids shell quoting issues with backticks and special characters in code snippets.
 
 ```bash
-# Step 1: Write body to temp file (use Write tool, not bash echo/cat)
-# File: /tmp/audit-issue-H1.md (one per issue)
+# Step 1: Create a temp directory for this audit's issues
+# mkdir -p /tmp/audit-issues-YYYYMMDD/
 
-# Step 2: Create the issue
+# Step 2: Write body to temp file (use Write tool, not bash echo/cat)
+# File: /tmp/audit-issues-YYYYMMDD/H1.md
+
+# Step 3: Create the issue
 gh issue create \
   --title "[Audit] Brief description of the finding" \
-  --body-file /tmp/audit-issue-H1.md \
+  --body-file /tmp/audit-issues-YYYYMMDD/H1.md \
   --label "audit,<severity>"
 
-# Step 3: Clean up temp file
-rm /tmp/audit-issue-H1.md
+# Step 4: Clean up after all issues are created
+# rm -rf /tmp/audit-issues-YYYYMMDD/
 ```
 
 **Issue body template:**
 
-```markdown
+~~~markdown
 ## Audit finding
 
 **ID:** C-1 / H-3 / etc.
@@ -593,8 +616,8 @@ step by step with enough detail to implement without ambiguity.
 **Estimate:** ~small / ~medium / ~large
 
 ---
-*Generated by codebase-audit v3.5.0*
-```
+*Generated by codebase-audit v3.6.0*
+~~~
 
 **Issue quality rules:**
 - **All template sections are required for every severity** (Context, Problem, Current code, Suggested fix, Acceptance criteria). LOW findings are not an excuse to skip sections — a self-contained issue needs the same structure regardless of severity.
@@ -687,12 +710,13 @@ What's the cost of not acting on the critical findings?
 
 Machine-readable block for cross-audit comparison. DO NOT delete or manually edit.
 
-​```yaml
+~~~yaml
 # audit-metrics (used by future audits for automatic comparison)
 date: YYYY-MM-DD
-version: 3.5.0
+version: 3.6.0
 scope: full
 grade: X
+duration_minutes: N
 findings:
   critical: N
   high: N
@@ -712,12 +736,14 @@ hotspots:
     churn: N  # commits in last 3 months
   - file: path/to/file
     churn: N
-​```
+~~~
 ```
 
 ### Overall assessment rubric
 
-Instead of an arbitrary rating, use this rubric with objective criteria:
+Instead of an arbitrary rating, use this rubric with objective criteria.
+
+**Maturity context:** Adjust expectations based on project age. An early-stage MVP (< 6 months) naturally carries more HIGH findings than a mature production system. Note the project's maturity in the executive summary and factor it into the grade — e.g., "Grade B, appropriate for a 3-month-old project that would need to reach A before scaling."
 
 | Grade | Criteria |
 |-------|----------|
@@ -726,8 +752,6 @@ Instead of an arbitrary rating, use this rubric with objective criteria:
 | **C — Needs attention** | ≤1 CRITICAL, ≤10 HIGH. Tests >30%. Partial CI. Outdated docs. Complex setup. |
 | **D — High risk** | 2+ CRITICAL or >10 HIGH. Tests <30%. No CI or broken CI. No docs. Non-reproducible setup. |
 | **F — Critical** | Active vulnerabilities, exposed data, or unstable system in production. Requires emergency action. |
-
-**Maturity context:** Adjust expectations based on project age. An early-stage MVP (< 6 months) naturally carries more HIGH findings than a mature production system. Note the project's maturity in the executive summary and factor it into the grade — e.g., "Grade B, appropriate for a 3-month-old project that would need to reach A before scaling."
 
 ---
 
@@ -754,13 +778,14 @@ Before delivering the report, verify each item:
 
 ## Execution rules
 
-1. **Phase by phase**: Complete each phase before moving to the next. Show progress to the user at the end of each phase.
-2. **Concrete evidence**: Each finding must cite specific files and lines. Don't make vague claims.
-3. **Propose solutions**: Don't just flag problems. Each finding must include a concrete remediation with effort estimate.
-4. **Prioritize impact**: Don't dedicate the same space to a security issue as to an inconsistent naming convention.
-5. **Be honest about limitations**: If you couldn't review something (e.g., no DB access, can't run tests), say so explicitly.
-6. **Don't inflate the report**: If the codebase is fine in some area, say so briefly and move on. Don't invent problems to make the report look thorough.
-7. **Compare with state of the art**: Briefly mention if there are best practices or tools the project should adopt, with links when possible.
-8. **Distrust "clean" code**: LLM-generated code tends to look well-structured and tidy, but that doesn't guarantee correctness. Verify every assumption, every import, every method call.
-9. **Parallelize with subagents**: Use the execution strategy to maintain quality in later phases. Don't sacrifice depth due to context limitations.
-10. **Stable IDs**: Use IDs (C-1, H-3, M-7, L-2) for each finding so future audits can reference and track resolution.
+1. **Print progress after every phase.** When a subagent completes, IMMEDIATELY print a line like `✓ Phase 2 complete — 0 critical, 3 medium findings`. Do this BEFORE reading the next result or launching the next group. The user cannot see subagent internals — your progress lines are their only visibility into what's happening.
+2. **Wait for ALL subagents before consolidating.** Do NOT start writing the report until every launched subagent has returned its result. A premature report will be missing findings.
+3. **Concrete evidence**: Each finding must cite specific files and lines. Don't make vague claims.
+4. **Propose solutions**: Don't just flag problems. Each finding must include a concrete remediation with effort estimate.
+5. **Prioritize impact**: Don't dedicate the same space to a security issue as to an inconsistent naming convention.
+6. **Be honest about limitations**: If you couldn't review something (e.g., no DB access, can't run tests), say so explicitly.
+7. **Don't inflate the report**: If the codebase is fine in some area, say so briefly and move on. Don't invent problems to make the report look thorough.
+8. **Compare with state of the art**: Briefly mention if there are best practices or tools the project should adopt, with links when possible.
+9. **Distrust "clean" code**: LLM-generated code tends to look well-structured and tidy, but that doesn't guarantee correctness. Verify every assumption, every import, every method call.
+10. **Parallelize with subagents**: Use the execution strategy to maintain quality in later phases. Don't sacrifice depth due to context limitations.
+11. **Stable IDs**: Use IDs (C-1, H-3, M-7, L-2) for each finding so future audits can reference and track resolution.

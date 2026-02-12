@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.6.0
+- Simplified bus factor command: unique contributors via `sort -u`, AI detection as optional note
+- Added `quick` scope: Phase 0 + top 5 findings + grade (~5 min triage)
+- Added subagent failure handling instruction (SKIPPED with error, one retry for transient)
+- Added `duration_minutes` to YAML metrics block
+- Added time estimate model/API speed disclaimer
+- Added stale code command performance note for large repos (>50k tracked files)
+- Improved reconcile "verify the fix" guidance (confirm root cause addressed)
+- Improved docstring regex: `"""[A-Z]` → pattern matching LLM filler phrases (This/The/A function/method/class)
+- Moved maturity context before rubric table for better reading order
+- Phase 3.7 (frontend) now runs inside Phase 3 subagent, not as separate subagent
+- Phase 2.5 consolidation clarified: happens at report time, not in subagent
+- Removed redundant Phase 2/Group 1 parallelization note
+- Fixed nested code fences in issue template: outer fence uses `~~~` to avoid conflicts
+- Fixed YAML metrics block: uses `~~~yaml` instead of zero-width-space escaped backticks
+- Issue temp files use date-based directory (`/tmp/audit-issues-YYYYMMDD/`) to avoid naming conflicts
+
 ### codebase-audit v3.5.0
 - Added license compliance check (Phase 1, step 4): flag copyleft deps in non-copyleft projects
 - Added secret scanning tool suggestions (trufflehog, gitleaks) in Phase 2.1
