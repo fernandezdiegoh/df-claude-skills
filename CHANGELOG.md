@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.4.1
+- Fixed Phase 4.1 regex patterns: `\|` (grep BRE) → `|` (ripgrep/Rust regex) for alternation
+
 ### codebase-audit v3.4.0
 - Added Tool preference section: prefer Glob/Grep/Read over bash grep/find (macOS compatibility)
 - Phase 4.1 LLM detection now uses Grep/Glob tool references instead of `grep -P` (not available on macOS)
