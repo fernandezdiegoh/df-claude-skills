@@ -6,7 +6,7 @@ Custom skills for Claude Code. Optimized to detect patterns in LLM-generated cod
 
 | Skill | Description | Version |
 |-------|-------------|---------|
-| [`codebase-audit`](skills/codebase-audit/) | Full audit — architecture, security, tech debt, remediation roadmap | 3.6.0 |
+| [`codebase-audit`](skills/codebase-audit/) | Full audit — architecture, security, tech debt, remediation roadmap | 3.7.0 |
 | [`pr-review`](skills/pr-review/) | Rigorous PR review, assumes problems exist until proven otherwise | 1.3.0 |
 | [`frontend-design`](skills/frontend-design/) | Distinctive, production-grade frontend interfaces | 1.0.0 |
 | [`documentation-expert`](skills/documentation-expert/) | Audit, create, and improve docs — detects stale content and LLM filler | 2.3.0 |

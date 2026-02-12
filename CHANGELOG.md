@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.7.0
+- Added `diff` scope: audit only files changed since last audit date (from YAML metrics)
+- Added `subagent_type` selection: `general-purpose` for Group 1 (needs Bash), `Explore` for Group 2 (read-only)
+- Added >100k LOC time estimate bucket with aggressive sampling strategy
+- Added `[STATIC-ONLY]` tag for security findings that require runtime verification
+- Added finding→issue backlinks (`**Tracked in:** #N`) after Phase 7 issue creation
+- Added Phase 0 parallelization note (backend + frontend checks in parallel)
+- Added subagent output file paths to checkpoint format for recovery
+- Added `.claude/settings.json` and hooks mention to Phase 1 reconnaissance
+- Expanded YAML metrics: `codebase` (files, LOC, languages) and `tests` (total, backend, frontend)
+- Reconcile mode now refreshes test inventory (section 5.1) as factual data
+- Report template version references now dynamic (read from frontmatter, not hardcoded)
+- Fixed: all subagents use `general-purpose` (Explore agents can't write to `/tmp/` files)
+- Fixed: docstring regex used BRE `\|` instead of ripgrep `|` — pattern never matched
+- Fixed: `diff` scope now has fallback when no previous audit exists
+- Moved `[STATIC-ONLY]` tag to top of Phase 2 (applies to 2.5 and 2.6, not just 2.5)
+- `quick` scope now includes automated security greps (Phase 2 patterns, no manual analysis)
+- Fixed: `latest.md` only overwritten by `full` audits and `reconcile` — partial scopes no longer destroy previous findings
+- Fixed: Phase 6 moved to Final (sequential) — it consolidates all phases and can't run in parallel with them
+- Added `diff:YYYY-MM-DD` date override variant for diff scope without previous audit
+- Fixed: exit checklist now deletes checkpoint after report is saved (was incorrectly saving it)
+
 ### codebase-audit v3.6.0
 - Simplified bus factor command: unique contributors via `sort -u`, AI detection as optional note
 - Added `quick` scope: Phase 0 + top 5 findings + grade (~5 min triage)

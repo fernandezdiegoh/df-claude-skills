@@ -15,6 +15,7 @@ Performs a structured 8-phase audit of your codebase, producing a prioritized re
 /codebase-audit security         # security and vulnerable deps only
 /codebase-audit architecture     # structure, coupling, API surface
 /codebase-audit quality          # code quality, LLM patterns, tests
+/codebase-audit diff             # only files changed since last audit
 /codebase-audit frontend         # frontend files only
 /codebase-audit module:src/auth  # audit a specific directory
 ```
@@ -25,7 +26,8 @@ Approximate times by codebase size:
 |----------|-----------|---------------|
 | < 10k LOC | ~15 min | ~5 min |
 | 10k–50k LOC | ~25 min | ~10 min |
-| > 50k LOC | ~40 min | ~15 min |
+| 50k–100k LOC | ~40 min | ~15 min |
+| > 100k LOC | ~60 min | ~20 min |
 
 ## What you get
 
@@ -51,14 +53,13 @@ The audit runs phases in parallel via subagents and prints progress as each comp
 ✓ Phase 1 complete — 26k LOC, 20 hotspots, bus factor 1 (critical)
 ✓ Phase 2 complete — 0 critical, 1 high, 4 medium findings
 
-⏳ Launching Group 2: Phase 3 + Phase 4 + Phase 5 + Phase 6
+⏳ Launching Group 2: Phase 3 + Phase 4 + Phase 5
 
 ✓ Phase 3 complete — 2 high, 6 medium, 8 low findings (architecture)
 ✓ Phase 4 complete — 3 high, 8 medium, 7 low findings (quality)
 ✓ Phase 5 complete — 0 high, 3 medium, 7 low findings (operability)
-✓ Phase 6 complete — 7 critical, 11 structural, 8 cosmetic debt items
 
-⏳ All phases complete. Consolidating report...
+⏳ Consolidating tech debt (Phase 6) and writing report...
 ```
 
 ### Audit summary
@@ -199,6 +200,7 @@ Lightweight verification (~5-10 min) that checks whether existing findings have 
 
 | Version | Changes |
 |---------|---------|
+| 3.7.0 | Diff scope, >100k LOC sampling, finding→issue backlinks, expanded YAML metrics, [STATIC-ONLY] tag, Phase 0 parallelization, reconcile refreshes test inventory, `latest.md` protected from partial overwrites, Phase 6 moved to sequential consolidation, `diff:YYYY-MM-DD` override, quick scope includes security skim, BRE regex fix |
 | 3.6.0 | Quick scope, simplified bus factor, subagent failure handling, duration metrics, improved docstring regex, nested fence fix, Phase 3.7 merged into Phase 3 subagent, date-based issue temp dirs |
 | 3.5.0 | License compliance, secret scanning tools, issue dedup, reconcile file handling, dep pinning, maturity rubric, critical file definition, bus factor improvements, LOC-based time estimates, WORSENED highlighting, body-file issues, all-severity issue creation |
 | 3.4.1 | Fixed regex alternation syntax (BRE → ripgrep) |

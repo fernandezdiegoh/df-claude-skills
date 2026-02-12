@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.6.0
+version: 3.7.0
 language: en
 category: audit
 ---
@@ -33,13 +33,16 @@ By default, the audit is **full** (all phases, entire codebase). If the user spe
 | `backend` | All, filtered to backend/ | Backend files only |
 | `frontend` | All, filtered to frontend/ | Frontend files only |
 | `module:<path>` | All, filtered to path | Audit a specific directory |
-| `quick` | 0 only | Phase 0 + top 5 findings + grade (~5 min triage) |
+| `quick` | 0 + security skim | Phase 0 + automated security greps + top 5 findings + grade (~5 min triage) |
+| `diff` | All, filtered to changed files | Only files changed since last audit date (from YAML `date:` field) |
 
 **Note:** Phase 0 (automated checks) always runs against the entire project, regardless of scope — linters, type checkers, and test suites need the full context.
 
 **`module:<path>` scope:** All phases run but filtered to the specified path. Phase 0 still runs full. Subagents receive the path filter and only analyze files within it.
 
-**`quick` scope:** Run Phase 0 only, then summarize the top 5 most impactful findings and assign a grade. Useful for triage — deciding whether a full audit is warranted.
+**`quick` scope:** Run Phase 0 (linter, tests, dep audit) plus a rapid security skim (grep for secrets, `eval()`, `dangerouslySetInnerHTML`, hardcoded credentials — the automated patterns from 2.1/2.2 only, no manual analysis). Summarize the top 5 most impactful findings from both and assign a grade. Useful for triage — deciding whether a full audit is warranted.
+
+**`diff` scope:** Run all phases but only analyze files changed since the last audit. Extract the date from the YAML metrics block in `docs/audits/latest.md`, then use `git log --since=<date> --pretty=format: --name-only | sort -u` to get the file list. Phase 0 still runs full. Useful for incremental audits between full runs. If `docs/audits/latest.md` doesn't exist or has no YAML `date:` field, abort with: "No previous audit date found. Run a full audit first, or specify a date manually: `/codebase-audit diff:2026-01-15`." **Date override:** If the user specifies `diff:YYYY-MM-DD` (e.g., `diff:2026-01-15`), use that date instead of extracting from the YAML block. This allows running diff audits even without a previous full audit.
 
 When the scope is partial, the report must state it clearly. For sections not applicable to the project (e.g., 2.6 if no Docker, 3.5 if no DB, 3.7 if no frontend), include an explicit skip line:
 
@@ -72,7 +75,8 @@ A full audit is context-intensive and time-consuming. Approximate times by codeb
 |---------------|-----------|---------------|
 | < 10k LOC | ~15 min | ~5 min |
 | 10k–50k LOC | ~25 min | ~10 min |
-| > 50k LOC | ~40 min | ~15 min |
+| 50k–100k LOC | ~40 min | ~15 min |
+| > 100k LOC | ~60 min | ~20 min |
 
 These times assume a fast model (Claude Opus/Sonnet) with low API latency. Actual duration varies with model speed and codebase complexity.
 
@@ -85,10 +89,12 @@ Use the **Task tool** to delegate independent phases to subagents working in par
 ```
 Group 1 (parallel): Phase 0 (automated checks) + Phase 1 (reconnaissance) + Phase 2 (security)
   → WAIT for ALL three to complete before proceeding
-Group 2 (parallel): Phase 3 (architecture, includes 3.7 frontend) + Phase 4 (quality) + Phase 5 (operability) + Phase 6 (tech debt)
+Group 2 (parallel): Phase 3 (architecture, includes 3.7 frontend) + Phase 4 (quality) + Phase 5 (operability)
   → WAIT for ALL to complete before proceeding
-Final (sequential): Report consolidation + Phase 7 (issues)
+Final (sequential): Phase 6 (tech debt consolidation) + Report writing + Phase 7 (issues)
 ```
+
+**Subagent type:** Use `subagent_type="general-purpose"` for all subagents. All phases need to write their results to `/tmp/audit-phase-N.md` (requires Write tool), and Group 1 phases also need Bash for linters, git, and dep audit.
 
 **CRITICAL: Do NOT start report consolidation until every subagent has completed.** Read each Task Output and confirm completion. If a subagent is still running, wait for it. A premature report will be missing findings.
 
@@ -123,7 +129,7 @@ The main agent reads these files during the consolidation phase. This keeps the 
 ✓ Phase 0 complete — 0 lint errors, 631 tests passing, 1 vuln dep
 ✓ Phase 1 complete — 39k LOC, 5 hotspots, bus factor OK
 ✓ Phase 2 complete — 0 critical, 2 medium (error leaks)
-⏳ Launching Group 2: Phase 3 + Phase 4...
+⏳ Launching Group 2: Phase 3 + Phase 4 + Phase 5...
 ```
 
 Do NOT silently collect results. The user sees opaque task IDs — your progress lines are the only way they know what's happening.
@@ -142,13 +148,15 @@ Before writing the checkpoint, verify that `docs/.audit-checkpoint.md` is listed
 Checkpoint format:
 ```markdown
 # Audit Checkpoint — [project]
-## Phase 0: COMPLETE
+## Phase 0: COMPLETE → /tmp/audit-phase-0.md
 [summarized findings]
-## Phase 1: COMPLETE
+## Phase 1: COMPLETE → /tmp/audit-phase-1.md
 [summarized findings]
-## Phase 2: IN PROGRESS
+## Phase 2: IN PROGRESS → /tmp/audit-phase-2.md
 [partial findings]
 ```
+
+Include the subagent output file path for each phase so recovery after interruption can read the full results without re-running completed phases.
 
 If the audit is interrupted, it can be resumed by reading the checkpoint and continuing from the last incomplete phase.
 
@@ -166,7 +174,7 @@ docs/audits/
 
 **Naming:** `YYYY-MM-DD.md` for full audits. `YYYY-MM-DD-<scope>.md` for partial scopes and reconciliations (e.g., `2026-03-15-security.md`, `2026-04-01-frontend.md`, `2026-04-10-reconcile.md`).
 
-**`latest.md`:** After saving the dated report, copy it to `docs/audits/latest.md` (overwrite). This is the stable reference that other files (CLAUDE.md, scripts, CI) should point to — it never requires updating references when a new audit is created.
+**`latest.md`:** Only overwritten by `full` audits and `reconcile` updates. After saving a full audit's dated report, copy it to `docs/audits/latest.md` (overwrite). This is the stable reference that other files (CLAUDE.md, scripts, CI) should point to — it never requires updating references when a new audit is created. Partial scopes (`security`, `diff`, `backend`, etc.) save as `YYYY-MM-DD-<scope>.md` only — they do NOT overwrite `latest.md`, which always reflects the most recent full audit.
 
 **Retention:** Keep all dated reports. They're small files and the diff between audits is the primary value of the cross-audit comparison in Phase 0.
 
@@ -174,7 +182,7 @@ docs/audits/
 - `docs/audits/*.md` — committed (the report is a deliverable)
 - `docs/.audit-checkpoint.md` — gitignored (temporary, only needed during the audit)
 
-Create `docs/audits/` if it doesn't exist. After saving both files, inform the user of the paths.
+Create `docs/audits/` if it doesn't exist. After saving the report file(s), inform the user of the path(s).
 
 ### Depth rule
 
@@ -185,6 +193,8 @@ Create `docs/audits/` if it doesn't exist. After saving both files, inform the u
 **Critical files** — always full read regardless of size: files handling authentication, authorization, payment/billing, PII/sensitive data, external API integrations, database writes, or files imported by >10 other modules. When in doubt, check git churn — high-churn files are likely critical.
 
 **Large repos (>50k LOC):** Focus depth on critical files and use git churn data from Phase 1 to prioritize which modules get full analysis vs. sampling. Breadth-first scan everything, depth-first only where risk or churn is high.
+
+**Very large repos (>100k LOC):** Aggressive sampling is required. Limit full reads to: (1) critical files, (2) top-20 churn hotspots, (3) files with known vulnerabilities from Phase 0. For everything else, use Grep pattern searches and read only matching regions. State the sampling strategy explicitly in the Reconnaissance section so the user knows what was and wasn't covered.
 
 ---
 
@@ -211,6 +221,7 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
    - Mark resolved findings with ~~strikethrough~~ and `RESOLVED`
    - Update the `Last updated` field in the header
    - Update the YAML metrics block (finding counts by severity)
+   - **Refresh the test inventory** (section 5.1): re-scan test files and update counts/paths. Test inventory is factual data that should always reflect the current state, unlike findings which require a full audit.
    - Do NOT add new findings — that's what a full audit is for
 
 5. **Save a reconciliation snapshot.** Copy the updated `latest.md` to `docs/audits/YYYY-MM-DD-reconcile.md`. This provides a historical record of when findings were resolved, separate from full audit archives.
@@ -292,6 +303,8 @@ Before the manual audit, run the automated tools available in the project. Don't
 
 If a tool is not installed or fails to run, note it as **SKIPPED** with the reason. Do not block the audit on a single missing tool — record what you couldn't check and move on.
 
+**Parallelization within Phase 0:** If the project has both backend and frontend, run their checks in parallel (e.g., `ruff check` + `pytest` in one Bash call, `tsc --noEmit` + `vitest run` in another). This can halve Phase 0 time.
+
 Report Phase 0 results as part of the reconnaissance. Errors found here are incorporated directly into findings without additional manual analysis.
 
 ---
@@ -331,7 +344,7 @@ Analyze:
 - **Commit patterns**: Large commits without review, force pushes, direct commits to main/staging
 - **Stale code**: Files nobody touches for months may be dead code or ticking time bombs
 
-9. **Project instructions**: Read `CLAUDE.md`, `.claude/` directory, and any project-level instruction files. These often contain architectural decisions, known bugs, conventions, and constraints that are critical context for the audit. Incorporate relevant findings (e.g., documented workarounds, intentional tech debt, deployment constraints).
+9. **Project instructions**: Read `CLAUDE.md`, `.claude/` directory, and any project-level instruction files. These often contain architectural decisions, known bugs, conventions, and constraints that are critical context for the audit. Incorporate relevant findings (e.g., documented workarounds, intentional tech debt, deployment constraints). Also check `.claude/settings.json` for allowed/denied tool patterns and hooks — these affect what the audit can run and may reveal security-relevant permissions.
 
 Produce an executive summary of the reconnaissance before continuing.
 
@@ -340,6 +353,8 @@ Produce an executive summary of the reconnaissance before continuing.
 ### Phase 2: Security
 
 Security comes first because a critical finding here can invalidate everything else.
+
+**[STATIC-ONLY] tag:** Some security findings (especially 2.5 and 2.6) cannot be fully verified without runtime access (e.g., "CORS might be overridden by a reverse proxy", "rate limiting may exist at the infrastructure level", "database port exposed but may be behind a firewall"). Tag these with `[STATIC-ONLY]` in the finding description so the reader knows it requires runtime verification. Example: `[STATIC-ONLY] CORS set to * in code — verify this isn't overridden by Cloudflare/nginx at deploy time`.
 
 #### 2.1 Secrets and credentials
 - Are there secrets, API keys, tokens, or credentials in the code or committed files?
@@ -448,7 +463,7 @@ Use **Grep** and **Glob** tools (not bash `grep`/`find`) for these checks. Searc
 | Abandoned placeholders (JS/TS) | `// TODO|// FIXME|// HACK|console\.log|throw new Error.*(not implemented|todo)` | `*.{ts,tsx,js}` |
 | Over-engineering patterns | Use **Glob** for files matching `**/*Factory*`, `**/*Strategy*`, `**/*Adapter*`, `**/*Builder*`, `**/*Abstract*` | Exclude `node_modules`, `__pycache__` |
 | Empty or trivial tests | `toBeTruthy|toBeDefined|toBeUndefined|assertIsNotNone|assert.*is not None$|expect\(true\)` | `*.{py,ts,tsx}` in `tests/` |
-| Bloated docstrings | `"""\s*(This\|The\|A)\s+(function\|method\|class\|module)` (review first ~30 matches with context) | `*.py` |
+| Bloated docstrings | `"""\s*(This|The|A)\s+(function|method|class|module)` (review first ~30 matches with context) | `*.py` |
 | Phantom dependencies | Compare imports against `requirements.txt` / `package.json` manually | — |
 
 **Manual analysis after the checks:**
@@ -545,7 +560,7 @@ This inventory is updated on every full audit and reconcile. Other docs (CLAUDE.
 
 ### Phase 6: Tech debt and risks
 
-Consolidate everything found into a tech debt assessment:
+**This phase runs sequentially after all others complete** (not in parallel). Read all `/tmp/audit-phase-N.md` files and consolidate everything found into a tech debt assessment:
 
 1. **Critical debt**: Problems that can cause incidents, data loss, or security vulnerabilities. Require immediate action.
 2. **Structural debt**: Architecture problems that slow development and make the system fragile. Require planning.
@@ -643,7 +658,7 @@ step by step with enough detail to implement without ambiguity.
 **Estimate:** ~small / ~medium / ~large
 
 ---
-*Generated by codebase-audit v3.6.0*
+*Generated by codebase-audit vX.Y.Z — use version from this skill's frontmatter*
 ~~~
 
 **Issue quality rules:**
@@ -651,6 +666,8 @@ step by step with enough detail to implement without ambiguity.
 - **Current code is mandatory.** Always include the actual problematic snippet, not a description of it.
 - **Suggested fix must be concrete.** Show code, not "improve error handling". If multiple approaches exist, pick one and explain why.
 - **Acceptance criteria must be testable.** Not "code is better" — specific conditions that can be verified.
+
+**After creating all issues, backlink them in the report.** For each finding that got an issue, append `**Tracked in:** #N` to the finding in the audit report file (`latest.md` for full audits, or the dated report for partial scopes). This creates bidirectional traceability between the report and the issue tracker.
 
 Report to the user how many issues were created and their URLs.
 
@@ -670,7 +687,7 @@ Each finding must include a **severity**:
 ```
 # Codebase Audit: [Project Name]
 Date: [date]
-Auditor: Claude (codebase-audit v3.5.0)
+Auditor: Claude (codebase-audit vX.Y.Z — use version from this skill's frontmatter)
 Scope: [what was reviewed and what wasn't]
 Last updated: [date] — [update context]
 
@@ -743,10 +760,16 @@ Machine-readable block for cross-audit comparison. DO NOT delete or manually edi
 ~~~yaml
 # audit-metrics (used by future audits for automatic comparison)
 date: YYYY-MM-DD
-version: 3.6.0
+version: X.Y.Z
 scope: full
 grade: X
 duration_minutes: N
+codebase:
+  files: N
+  loc: N
+  languages:
+    - python
+    - typescript
 findings:
   critical: N
   high: N
@@ -754,6 +777,10 @@ findings:
   low: N
 resolved_since_last: N
 new_since_last: N
+tests:
+  total: N
+  backend: N
+  frontend: N
 coverage:
   backend: N%
   frontend: N%
@@ -801,8 +828,8 @@ Before delivering the report, verify each item:
 10. Grade the codebase using the objective rubric (A-F)
 11. Fill the YAML metrics block completely and verify it parses
 12. Confirm the report is actionable — someone can pick it up and execute without asking questions
-13. Save the final report to `docs/audits/YYYY-MM-DD.md` AND copy to `docs/audits/latest.md`
-14. Verify `docs/.audit-checkpoint.md` is in `.gitignore`, then save the checkpoint
+13. Save the final report to `docs/audits/YYYY-MM-DD.md` AND copy to `docs/audits/latest.md` (full audits only — partial scopes do NOT overwrite `latest.md`)
+14. Verify `docs/.audit-checkpoint.md` is in `.gitignore`, then clean up temporary files: delete the checkpoint file and all `/tmp/audit-phase-*.md` output files — they're no longer needed after the report is saved
 
 ---
 
