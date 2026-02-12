@@ -6,7 +6,7 @@
 
 Performs a line-by-line code review of a Pull Request with a skeptical mindset. Specifically tuned to catch patterns typical of LLM-generated code: unnecessary abstractions, hallucinated methods, dead code, superficial tests, and silent error swallowing.
 
-Works both as a **standalone skill** (`/pr-review` from any Claude Code session) and as part of **agent-team workflows** (reviewer, senior-reviewer, final-reviewer roles).
+Works both as a **standalone skill** (`/pr-review` from any Claude Code session) and as part of **[agent-team](https://github.com/sovrahq/agent-teams) workflows** (reviewer, senior-reviewer, final-reviewer roles — invoked with `--team` flag).
 
 ## Usage
 
