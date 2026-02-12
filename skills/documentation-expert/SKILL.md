@@ -1,7 +1,7 @@
 ---
 name: documentation-expert
 description: Audit, create, and improve project documentation. Detects stale docs, missing coverage, and LLM-generated filler. Produces actionable docs that developers actually read.
-version: 2.2.0
+version: 2.3.0
 language: en
 category: docs
 ---
@@ -26,6 +26,7 @@ The user may request one of several modes:
 |------|-------------|
 | `audit` | Assess existing docs: what's missing, what's stale, what's filler |
 | `summary` | Quick triage: health summary + top 5 findings, no writing |
+| `validate` | Run Phase 4 checks only (broken links, stale refs, placeholders) |
 | `create <type>` | Write new documentation of a specific type (see types below) |
 | `improve <file>` | Rewrite or improve an existing doc |
 | `full` (default) | Audit + create/fix everything needed |
@@ -37,6 +38,7 @@ If no mode is specified, default to `full`.
 /documentation-expert                        # full mode (audit + fix everything)
 /documentation-expert audit                  # assess only, don't write
 /documentation-expert summary                # quick health check, top 5 findings
+/documentation-expert validate               # check links, refs, placeholders only
 /documentation-expert create architecture    # write a new architecture doc
 /documentation-expert create ADR             # write a new ADR
 /documentation-expert improve docs/api.md    # rewrite an existing doc
@@ -115,12 +117,12 @@ For each match, extract the target path and verify it exists with Glob.
 
 **Step 4 — Find code references that may be outdated:**
 
-Use Grep to find file path references in docs (require at least one `/` to avoid false positives like `v1.0` or `user.name`):
+Use Grep to find file path references in docs. Require at least one `/` and a known file extension to avoid false positives (URLs, version numbers, import paths):
 ```
-Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+`  (glob: *.md, in docs/)
-Grep: `[a-zA-Z_]+\(\)`              (glob: *.md, in docs/)
+Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|toml|sql|sh)`  (glob: *.md, in docs/)
+Grep: `[a-zA-Z_]+\(\)`  (glob: *.md, in docs/)
 ```
-Cross-reference against actual file paths and function names in the codebase.
+Ignore matches starting with `http` (URLs). Cross-reference remaining paths and function names against the actual codebase.
 
 **Manual assessment:**
 
@@ -146,7 +148,19 @@ For each doc found, evaluate:
 
 Statuses: `✅ current`, `⚠️ stale`, `⚠️ incomplete`, `❌ missing`, `🗑️ filler` (exists but adds no value).
 
-**In `summary` mode:** Stop here. Produce the health summary + documentation map + top 5 findings, then skip to the output format section.
+**Step 5 — Find orphan docs:**
+
+Build a graph of internal links between docs. Identify markdown files that no other doc links to. Entry points (README.md, CLAUDE.md, CHANGELOG.md) are exempt — they're discovered by convention, not links. Other orphan docs are likely unread and candidates for deletion or linking.
+
+**Step 6 — Scan for undocumented environment variables:**
+
+Search the codebase for env var usage patterns:
+```
+Grep: process\.env\.|os\.environ|os\.getenv|settings\.|env\(  (in source code, not docs)
+```
+Compare against documented env vars (in README, `.env.example`, or a config doc). Flag any variables used in code but not documented anywhere.
+
+**In `summary` mode:** Limit Phase 1 to top-level markdown files and `docs/` first level only — do not recurse into deep subdirectories. Produce the health summary + documentation map + top 5 findings, then skip to the output format section.
 
 ---
 
@@ -417,13 +431,15 @@ rather than listing every directory.
 
 ### Phase 4: Validate
 
+**In `validate` mode:** Jump directly to this phase. Skip Phases 1-3.
+
 Before delivering, run these automated checks:
 
 **Verify referenced paths exist:**
 ```
-Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+`  (in docs/, glob: *.md)
+Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+\.(py|ts|tsx|js|jsx|md|json|yaml|yml|toml|sql|sh)`  (in docs/, glob: *.md)
 ```
-For each backtick-quoted path found, use Glob to verify the file exists. Report any NOT FOUND.
+Ignore matches starting with `http`. For each remaining path, use Glob to verify the file exists. Report any NOT FOUND.
 
 **Verify no placeholder content left:**
 ```
@@ -456,9 +472,9 @@ Then confirm manually:
 ### Effort scale
 
 When estimating effort for findings, use this scale:
-- **~small** — under 30 minutes (add a section, fix a few references)
-- **~medium** — 1-2 hours (write a new doc from scratch, major rewrite)
-- **~large** — half day or more (architecture doc for complex system, full API reference)
+- **~small** — under 30 minutes (fix stale references, add a missing section to an existing doc, delete a filler doc)
+- **~medium** — 1-2 hours (write a simple feature doc or runbook, rewrite a stale doc)
+- **~large** — half day or more (architecture doc for a multi-service system, comprehensive API reference, full CLAUDE.md from scratch)
 
 ### Audit / summary report
 
@@ -512,7 +528,11 @@ When running in `audit`, `summary`, or `full` mode, produce a report:
 - [x] **<file>**: <what was done>
 ```
 
+**Tracking doc debt:** If the project has unresolved findings after the audit, offer to save the report as `docs/DOC-DEBT.md`. This serves as a lightweight tracker — findings are checkboxes that can be ticked off as they're addressed. Remove the file when all items are resolved.
+
 When running in `create` or `improve` mode, produce the documentation directly as markdown files.
+
+**In `validate` mode:** Produce only the automated check results (broken paths, placeholders, broken links, invalid commands). No documentation map, no findings breakdown.
 
 ---
 

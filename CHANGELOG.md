@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### documentation-expert v2.3.0
+- Added `validate` mode (run Phase 4 checks only — broken links, stale refs, placeholders)
+- Added summary mode depth limit (top-level + docs/ first level only)
+- Added orphan doc detection (Step 5 — docs with no inbound links)
+- Added env var scanning (Step 6 — find undocumented env vars in code)
+- Added doc debt tracking via `docs/DOC-DEBT.md` (lightweight checkbox tracker)
+- Tightened path regex to require file extension (.py/.ts/.md/.json/etc.) and ignore URLs
+- Improved effort scale examples (more precise per category)
+
 ### documentation-expert v2.2.0
 - Added `summary` mode for quick triage (health summary + top 5 findings, no writing)
 - Added hallucinated references detection to section 2.5 (plausible-looking paths/flags that don't exist)
