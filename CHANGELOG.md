@@ -4,10 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.3.0
+- Added `reconcile` mode: verify existing findings against current code, update statuses
+- Reconcile skips the full audit — only checks if open findings are resolved/improved/worsened
+- Produces a reconciliation summary with counts and per-finding status changes
+- Updates `latest.md` in place (strikethrough + RESOLVED, YAML metrics)
+- Time estimate: ~5-10 min vs 15-40 min for full audit
+- Improved Phase 7 issue template: self-contained issues with context, current code snippet, concrete fix, and testable acceptance criteria
+- Added issue quality rules (mandatory code snippets, concrete fixes, testable criteria)
+- MEDIUM/LOW findings can now be created as issues if user requests it
+
 ### codebase-audit v3.2.0
-- Added report storage policy: save to `docs/audits/YYYY-MM-DD.md` (full) or `YYYY-MM-DD-<scope>.md` (partial)
+- Added report storage policy: save to `docs/audits/YYYY-MM-DD.md` + copy to `docs/audits/latest.md`
+- `latest.md` is the stable reference — other files point to it, no updates needed on new audits
+- Dated files are historical archives for cross-audit comparison
 - Updated Phase 0 to search `docs/audits/` first, then legacy locations as fallback
-- Added exit checklist item for saving report to `docs/audits/`
+- Added exit checklist item for saving report + latest.md
 - Retention policy: keep all reports (small files, cross-audit diff is the value)
 
 ### documentation-expert v2.3.0

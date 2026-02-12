@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.2.0
+version: 3.3.0
 language: en
 category: audit
 ---
@@ -25,6 +25,7 @@ By default, the audit is **full** (all phases, entire codebase). If the user spe
 | Scope | Applicable phases | Description |
 |-------|-------------------|-------------|
 | `full` (default) | All (0-7) | Complete audit |
+| `reconcile` | None (see below) | Verify existing findings against current code, update statuses |
 | `security` | 0 + 2 | Security and vulnerable deps only |
 | `architecture` | 0 + 1 + 3 | Structure, coupling, API surface |
 | `quality` | 0 + 4 | Code quality, LLM patterns, tests |
@@ -94,26 +95,80 @@ Save the final audit report to `docs/audits/`:
 
 ```
 docs/audits/
-├── 2026-02-09.md              # full audit
-├── 2026-03-15.md              # full audit
+├── 2026-02-09.md              # historical archive
+├── 2026-03-15.md              # historical archive
 ├── 2026-03-15-security.md     # partial (scope as suffix)
+└── latest.md                  # always the current audit (overwritten)
 ```
 
 **Naming:** `YYYY-MM-DD.md` for full audits. `YYYY-MM-DD-<scope>.md` for partial scopes (e.g., `2026-03-15-security.md`, `2026-04-01-frontend.md`).
 
-**Retention:** Keep all reports. They're small files and the diff between audits is the primary value of the cross-audit comparison in Phase 0.
+**`latest.md`:** After saving the dated report, copy it to `docs/audits/latest.md` (overwrite). This is the stable reference that other files (CLAUDE.md, scripts, CI) should point to — it never requires updating references when a new audit is created.
+
+**Retention:** Keep all dated reports. They're small files and the diff between audits is the primary value of the cross-audit comparison in Phase 0.
 
 **What gets committed:**
 - `docs/audits/*.md` — committed (the report is a deliverable)
 - `docs/.audit-checkpoint.md` — gitignored (temporary, only needed during the audit)
 
-Create `docs/audits/` if it doesn't exist. After saving, inform the user of the file path.
+Create `docs/audits/` if it doesn't exist. After saving both files, inform the user of the paths.
 
 ### Depth rule
 
 - **Files < 200 LOC**: full read
 - **Files 200-500 LOC**: full read for critical files (entry points, auth, config), sampling for the rest
 - **Files > 500 LOC**: sampling of key sections (imports, exports, public functions, error handling)
+
+---
+
+## Reconcile mode
+
+When the scope is `reconcile`, skip the full audit process. Instead, verify whether existing findings have been resolved.
+
+**This mode does NOT detect new problems.** It only updates the status of findings already in the report. Run a `full` audit periodically to catch new issues.
+
+### Process
+
+1. **Read the latest report.** Load `docs/audits/latest.md`. If it doesn't exist, abort with a message: "No audit report found. Run a full audit first."
+
+2. **Extract all findings.** Parse findings with their IDs (C-N, H-N, M-N, L-N), severity, file location, and description.
+
+3. **Verify each finding against the codebase.** For each finding that is not already marked RESOLVED:
+   - Read the referenced file and line(s)
+   - Check if the reported problem still exists
+   - Determine status: `RESOLVED`, `PERSISTS`, `IMPROVED`, `WORSENED`
+   - For RESOLVED: verify the fix is correct, not just that the code changed
+
+4. **Update the report.** In `docs/audits/latest.md`:
+   - Mark resolved findings with ~~strikethrough~~ and `RESOLVED`
+   - Update the `Last updated` field in the header
+   - Update the YAML metrics block (finding counts by severity)
+   - Do NOT add new findings — that's what a full audit is for
+
+5. **Produce a summary.**
+
+```markdown
+## Reconciliation summary — [date]
+
+| Status | Count |
+|--------|-------|
+| RESOLVED | N |
+| PERSISTS | N |
+| IMPROVED | N |
+| WORSENED | N |
+
+### Resolved
+- ~~C-1: SQL injection in search endpoint~~ — fixed in `retriever.py:42`
+- ~~M-3: Missing input validation~~ — added in commit `abc1234`
+
+### Changed
+- H-5: CORS wildcard → IMPROVED (now scoped to specific origins)
+
+### Persists
+- H-3: Worker missing unit tests
+```
+
+**Time estimate:** ~5-10 minutes depending on number of open findings.
 
 ---
 
@@ -413,7 +468,7 @@ gh label create "critical" --description "Critical severity" --color "b60205" 2>
 gh label create "high" --description "High severity" --color "d93f0b" 2>/dev/null || true
 ```
 
-For each CRITICAL and HIGH finding, create a GitHub issue:
+For each CRITICAL and HIGH finding, create a GitHub issue. Each issue must be **self-contained** — someone (or an agent) should be able to pick it up and execute without reading the full audit report or asking clarifying questions.
 
 ```bash
 gh issue create \
@@ -421,29 +476,58 @@ gh issue create \
   --body "$(cat <<'EOF'
 ## Audit finding
 
-**Severity:** CRITICAL/HIGH
+**ID:** C-1 / H-3 / etc.
+**Severity:** CRITICAL / HIGH
 **Phase:** X.Y — Section name
 **Location:** `file:line`
+**Audit report:** `docs/audits/latest.md`
+
+## Context
+What the affected code does and why it matters. Include enough background
+that someone unfamiliar with this module can understand the problem.
 
 ## Problem
-Concrete description of the problem.
+Specific description: what is wrong, when it triggers, and what the
+symptoms are. Not "error handling is missing" — say exactly which error
+path is unhandled and what happens when it's hit.
 
-## Impact
-What can happen if left unresolved.
+## Current code
+\`\`\`python
+# file:line — the problematic code
+def search(query):
+    results = db.execute(f"SELECT * FROM docs WHERE content LIKE '%{query}%'")  # SQL injection
+\`\`\`
 
-## Suggested remediation
-Concrete steps to resolve.
+## Suggested fix
+\`\`\`python
+# Parameterized query
+def search(query):
+    results = db.execute("SELECT * FROM docs WHERE content LIKE %s", [f"%{query}%"])
+\`\`\`
 
-**Estimate:** X hours/days
+If the fix is architectural (not a simple code change), describe the approach
+step by step with enough detail to implement without ambiguity.
+
+## Acceptance criteria
+- [ ] Specific, verifiable condition that confirms the fix (e.g., "all queries use parameterized statements")
+- [ ] Test that covers the fix (e.g., "test with `'; DROP TABLE docs;--` input returns 0 results, no error")
+- [ ] No regressions (e.g., "existing search tests still pass")
+
+**Estimate:** ~small / ~medium / ~large
 
 ---
-*Generated by codebase-audit v3.2.0*
+*Generated by codebase-audit v3.3.0*
 EOF
 )" \
   --label "audit,<severity>"
 ```
 
-Group related findings into a single issue when it makes sense (e.g., multiple auth problems in one issue "Harden authentication layer").
+**Issue quality rules:**
+- **Current code is mandatory.** Always include the actual problematic snippet, not a description of it.
+- **Suggested fix must be concrete.** Show code, not "improve error handling". If multiple approaches exist, pick one and explain why.
+- **Acceptance criteria must be testable.** Not "code is better" — specific conditions that can be verified.
+- **Group related findings** into a single issue when it makes sense (e.g., multiple auth problems → "Harden authentication layer"). List each finding with its ID in the issue body.
+- **MEDIUM and LOW findings** can also be created as issues if the user requests it. Use the same template but with appropriate labels.
 
 Report to the user how many issues were created and their URLs.
 
@@ -463,7 +547,7 @@ Each finding must include a **severity**:
 ```
 # Codebase Audit: [Project Name]
 Date: [date]
-Auditor: Claude (codebase-audit v3.2.0)
+Auditor: Claude (codebase-audit v3.3.0)
 Scope: [what was reviewed and what wasn't]
 Last updated: [date] — [update context]
 
@@ -533,7 +617,7 @@ Machine-readable block for cross-audit comparison. DO NOT delete or manually edi
 ​```yaml
 # audit-metrics (used by future audits for automatic comparison)
 date: YYYY-MM-DD
-version: 3.2.0
+version: 3.3.0
 scope: full
 grade: X
 findings:
@@ -588,7 +672,7 @@ Before delivering the report, verify you completed everything:
 - [ ] The overall assessment uses the objective rubric (A-F), not an arbitrary rating
 - [ ] The YAML metrics block is complete and parseable
 - [ ] The report is actionable — someone can pick it up and start executing without asking questions
-- [ ] Saved the final report to `docs/audits/YYYY-MM-DD.md` (or `YYYY-MM-DD-<scope>.md` for partial)
+- [ ] Saved the final report to `docs/audits/YYYY-MM-DD.md` AND copied to `docs/audits/latest.md`
 - [ ] Saved the final checkpoint to `docs/.audit-checkpoint.md` (or `/tmp/` as fallback)
 
 ---
