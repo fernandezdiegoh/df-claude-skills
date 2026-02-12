@@ -477,6 +477,8 @@ Use **Grep** and **Glob** tools (not bash `grep`/`find`) for these checks. Searc
 - Is there an error boundary or appropriate global handler?
 
 #### 4.4 Testing
+
+Analysis questions:
 - What is the actual test coverage? (use Phase 0 data)
 - Which critical areas lack tests?
 - Are the tests unit, integration, or e2e? Is there an appropriate balance?
@@ -485,6 +487,31 @@ Use **Grep** and **Glob** tools (not bash `grep`/`find`) for these checks. Searc
 - Are tests independent of each other, or are there order dependencies?
 - Are mocks realistic, or do they simplify so much that tests validate nothing useful?
 - Do tests run fast, or are there slow tests that discourage execution?
+
+**Test inventory:** The audit report is the source of truth for test documentation. Produce a detailed inventory of all test files. For each file, list the path, test count, and what it covers. Group by category (unit, integration, e2e, frontend):
+
+```markdown
+**Backend — Unit (N tests)**
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `test_auth.py` | 6 | require_admin_role, require_super_admin |
+| `test_worker.py` | 18 | process_job, content fetching, retry, dead letter |
+
+**Backend — Integration (N tests)**
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `test_admin_router.py` | 21 | RBAC, batch routes, retry job |
+
+**Frontend (N tests)**
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `chat-widget.test.tsx` | 17 | XSS, send flow, streaming, error handling |
+```
+
+This inventory is updated on every full audit and reconcile. Other docs (CLAUDE.md, README) should reference `docs/audits/latest.md` for test metrics — never duplicate counts.
 
 #### 4.5 Configuration and environments
 - Is configuration separated from code (env vars, config files)?
@@ -694,6 +721,9 @@ Same format, IDs: L-N.
 - Test code vs production code ratio
 - Churn hotspots (git history)
 - Bus factor of critical modules
+
+## 5.1 Test inventory
+[Detailed test inventory from Phase 4.4 — tables by category with file, count, and coverage description]
 
 ## 6. Suggested remediation roadmap
 Order findings into a prioritized action plan:
