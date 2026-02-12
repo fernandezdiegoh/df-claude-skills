@@ -392,6 +392,11 @@ With `--team`, do not save to file — deliver via SendMessage only.
 
 After generating the findings report, offer to post it to the PR on GitHub. **Never post automatically** — always ask the user first.
 
+**CRITICAL rules for Step 4:**
+- **Never use `--approve`** — always use `--comment`. The reviewer is not the PR author and cannot approve.
+- **If the user selects Skip, end Step 4 immediately.** Do NOT post anything. Do not try an alternative. The user's choice is final.
+- **Present all three options clearly.** Do not collapse or rename them.
+
 Three options:
 
 **(a) Summary review:**
