@@ -81,6 +81,14 @@ Final (sequential): Report consolidation + Phase 7 (issues)
 
 Phase 2 (security) analyzes code directly and does not depend on Phase 0 or Phase 1 results, so it can start immediately.
 
+When spawning subagents, use descriptive names and descriptions so progress is readable:
+
+```
+Task(name="phase-0-automated-checks", description="Run linters, tests, and dep audit", ...)
+Task(name="phase-1-reconnaissance",   description="Map structure, deps, git history", ...)
+Task(name="phase-2-security",         description="Audit secrets, auth, inputs, CORS", ...)
+```
+
 Each subagent must return findings in a structured format (severity, location, problem, impact, remediation) so the final report can consolidate them.
 
 ### Intermediate checkpoints
