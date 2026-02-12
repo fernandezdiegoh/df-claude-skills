@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.2.0
+- Added report storage policy: save to `docs/audits/YYYY-MM-DD.md` (full) or `YYYY-MM-DD-<scope>.md` (partial)
+- Updated Phase 0 to search `docs/audits/` first, then legacy locations as fallback
+- Added exit checklist item for saving report to `docs/audits/`
+- Retention policy: keep all reports (small files, cross-audit diff is the value)
+
 ### documentation-expert v2.3.0
 - Added `validate` mode (run Phase 4 checks only — broken links, stale refs, placeholders)
 - Added summary mode depth limit (top-level + docs/ first level only)
