@@ -10,6 +10,7 @@ Performs a structured 8-phase audit of your codebase, producing a prioritized re
 
 ```
 /codebase-audit                  # full audit (all phases)
+/codebase-audit quick            # Phase 0 + top 5 findings + grade (~5 min triage)
 /codebase-audit reconcile        # verify if existing findings are resolved (~5-10 min)
 /codebase-audit security         # security and vulnerable deps only
 /codebase-audit architecture     # structure, coupling, API surface
@@ -37,6 +38,135 @@ Approximate times by codebase size:
 - **Report storage** in `docs/audits/YYYY-MM-DD.md` + `docs/audits/latest.md` (stable reference)
 - **Optional GitHub issue generation** for any severity — with dedup, grouping, and self-contained issue bodies
 
+## Examples
+
+### Progress updates during execution
+
+The audit runs phases in parallel via subagents and prints progress as each completes:
+
+```
+⏳ Launching Group 1: Phase 0 + Phase 1 + Phase 2
+
+✓ Phase 0 complete — 0 lint errors, 631 tests passing, 1 vuln dep
+✓ Phase 1 complete — 26k LOC, 20 hotspots, bus factor 1 (critical)
+✓ Phase 2 complete — 0 critical, 1 high, 4 medium findings
+
+⏳ Launching Group 2: Phase 3 + Phase 4 + Phase 5 + Phase 6
+
+✓ Phase 3 complete — 2 high, 6 medium, 8 low findings (architecture)
+✓ Phase 4 complete — 3 high, 8 medium, 7 low findings (quality)
+✓ Phase 5 complete — 0 high, 3 medium, 7 low findings (operability)
+✓ Phase 6 complete — 7 critical, 11 structural, 8 cosmetic debt items
+
+⏳ All phases complete. Consolidating report...
+```
+
+### Audit summary
+
+The final report opens with an executive summary, grade, and top risks:
+
+```markdown
+Grade: B — Acceptable
+
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 0     |
+| HIGH     | 6     |
+| MEDIUM   | 17    |
+| LOW      | 16    |
+
+Top 3 risks:
+1. SECRET_KEY insecure default — app encrypts data with a known key
+2. PyMuPDF AGPL license — copyleft dep in MIT-licensed project
+3. Global mutable state without locks — 5 dicts mutated without sync
+
+Top 3 strengths:
+1. 631 tests with CI enforcement and coverage ratchets
+2. Excellent documentation — CLAUDE.md + 15 modular docs
+3. Clean architecture — no circular deps, domain-based separation
+```
+
+### Progress vs. previous audit
+
+When a previous audit exists, the report includes a comparison table with regression tracking:
+
+```markdown
+| Old ID | Finding                    | Previous | Current    | Status                  |
+|--------|----------------------------|----------|------------|-------------------------|
+| C1     | Zero tests                 | CRITICAL | —          | RESOLVED (631 tests)    |
+| C2     | God files backend          | CRITICAL | —          | RESOLVED (PRs #73/#78)  |
+| I3     | Error handling inconsistent | HIGH     | MEDIUM     | IMPROVED                |
+| M3     | Threading locks             | MEDIUM   | MEDIUM     | **WORSENED** (4→5 dicts)|
+| —      | PyMuPDF AGPL license       | —        | HIGH (H-2) | NEW                     |
+
+Summary: 14 resolved, 8 persist, 1 worsened, 11 new. Trend: improving.
+```
+
+### GitHub issue (self-contained, with grouped findings)
+
+Related findings are merged into a single issue. Each issue includes enough context to implement without reading the full audit:
+
+```markdown
+## Audit finding
+
+**ID:** M-4, M-5
+**Severity:** MEDIUM
+**Phase:** 2.3 Authentication, 2.4 Sensitive data
+**Location:** `backend/app/whatsapp/webhook.py:40-65`
+
+## Context
+The WhatsApp integration receives webhooks from Twilio and processes
+messages through the RAG agent.
+
+## Problem
+### M-4: Webhook authentication is optional
+Twilio signature validation is skipped when auth_token is empty or
+the twilio package is not installed. Attackers can send spoofed
+requests that consume API credits.
+
+### M-5: PII logged in plaintext
+Phone numbers and message content logged without masking.
+
+## Current code
+    [actual problematic code snippet]
+
+## Suggested fix
+    [concrete code with the fix]
+
+## Acceptance criteria
+- [ ] Webhook rejects requests (403) when auth not configured
+- [ ] Phone numbers masked in all log messages
+- [ ] Rate limiting (30/min) added to webhook endpoint
+
+**Estimate:** ~small (2h)
+```
+
+### Reconcile output
+
+Lightweight verification that checks existing findings without a full audit:
+
+```markdown
+## Reconciliation summary — 2026-03-01
+
+| Status   | Count |
+|----------|-------|
+| RESOLVED | 4     |
+| PERSISTS | 3     |
+| IMPROVED | 1     |
+| WORSENED | 0     |
+
+### Resolved
+- ~~H-1: SECRET_KEY insecure default~~ — fixed in `config.py:32`
+- ~~H-2: PyMuPDF AGPL~~ — replaced with pypdf in commit `abc1234`
+
+### Changed
+- M-12: Logging → IMPROVED (structured logging added, correlation IDs pending)
+
+### Persists
+- H-4: Admin page duplication
+- M-1: Threading locks on global state
+```
+
 ## Reconcile mode
 
 Lightweight verification (~5-10 min) that checks whether existing findings have been resolved without running a full audit. Updates `latest.md` in place and saves a `YYYY-MM-DD-reconcile.md` snapshot. Handles renamed and deleted files.
@@ -59,7 +189,7 @@ Lightweight verification (~5-10 min) that checks whether existing findings have 
 - **Parallelized execution** via subagents with descriptive names
 - **Tool preference**: uses Claude Code's Glob/Grep/Read tools (not bash grep/find)
 - **License compliance** check (copyleft in non-copyleft projects)
-- **Bus factor** analysis excluding AI co-authors (Claude, Copilot, Cursor, etc.)
+- **Bus factor** analysis with optional AI co-author exclusion
 - **Critical file heuristic**: auth, payment, PII, external APIs, db writes, >10 importers
 - **Issue dedup**: checks existing open audit issues before creating new ones
 - **Issue grouping**: merges related findings into single actionable issues
