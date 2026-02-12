@@ -97,6 +97,16 @@ Task(name="phase-2-security",         description="Audit secrets, auth, inputs, 
 
 Each subagent must return findings in a structured format (severity, location, problem, impact, remediation) so the final report can consolidate them.
 
+**Progress updates:** After each subagent completes, print a brief progress line to the user so they can track what finished:
+
+```
+✓ Phase 0 complete — 0 lint errors, 631 tests passing, 1 vuln dep
+✓ Phase 1 complete — 39k LOC, 5 hotspots, bus factor OK
+✓ Phase 2 complete — 0 critical, 2 medium (error leaks)
+```
+
+This compensates for the opaque task IDs in the Claude Code UI.
+
 ### Intermediate checkpoints
 
 Save progress after each phase to a file so you don't depend on context:
