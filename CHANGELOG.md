@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.5.0
+- Added license compliance check (Phase 1, step 4): flag copyleft deps in non-copyleft projects
+- Added secret scanning tool suggestions (trufflehog, gitleaks) in Phase 2.1
+- Added issue dedup: check existing open audit issues before creating new ones
+- Added reconcile handling for renamed/deleted files (`git log --follow --diff-filter=R`)
+- Added dependency pinning check in Phase 1 (loose ranges risk breaking changes)
+- Added project maturity context to grade rubric (MVP vs mature system)
+- Added critical file definition (auth, payment, PII, db writes, >10 importers)
+- Improved bus factor heuristic: exclude AI co-authors (Claude, Copilot, Cursor, etc.)
+- Improved bus factor git command: two-step approach avoids multiline body parsing issues
+- Improved time estimates: LOC-based table instead of broad range
+- Clarified Phase 2 / Phase 0 relationship (2.5 consolidates dep audit data)
+- Clarified .gitignore edge case (create one if project has none)
+- Issue grouping moved to explicit pre-creation step with dedup
+- All template sections now required for every severity (LOW was skipping Context/Current code)
+- Normalized old audit labels to English in progress table
+- WORSENED findings highlighted with bold in progress table
+- Issue creation uses `--body-file` instead of heredoc (avoids shell quoting issues)
+- Offer issue creation for all severities (not just CRITICAL/HIGH)
+
 ### codebase-audit v3.4.1
 - Fixed Phase 4.1 regex patterns: `\|` (grep BRE) → `|` (ripgrep/Rust regex) for alternation
 

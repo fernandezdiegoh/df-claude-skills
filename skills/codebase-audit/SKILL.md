@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.4.1
+version: 3.5.0
 language: en
 category: audit
 ---
@@ -63,7 +63,13 @@ The bash examples in this skill are provided as reference for what to check, not
 
 ## Execution strategy
 
-A full audit is context-intensive and time-consuming. A `full` audit takes approximately **15-40 minutes** depending on codebase size, available subagents, and model speed. Partial scopes (`security`, `quality`, etc.) are significantly faster (~5-15 min).
+A full audit is context-intensive and time-consuming. Approximate times by codebase size:
+
+| Codebase size | Full audit | Partial scope |
+|---------------|-----------|---------------|
+| < 10k LOC | ~15 min | ~5 min |
+| 10k–50k LOC | ~25 min | ~10 min |
+| > 50k LOC | ~40 min | ~15 min |
 
 To maintain quality across all phases:
 
@@ -79,7 +85,7 @@ Group 4 (parallel): Phase 5 (operability) + Phase 6 (tech debt)
 Final (sequential): Report consolidation + Phase 7 (issues)
 ```
 
-Phase 2 (security) analyzes code directly and does not depend on Phase 0 or Phase 1 results, so it can start immediately.
+Phase 2 (security) analyzes code directly and can start immediately without waiting for Phase 0 or Phase 1. However, Phase 2.5 (attack surface — dependency vulnerabilities) should consolidate its results with Phase 0's dependency audit data once available.
 
 When spawning subagents, use descriptive names and descriptions so progress is readable:
 
@@ -100,7 +106,7 @@ docs/.audit-checkpoint.md    (preferred — survives reboots)
 /tmp/audit-checkpoint.md     (fallback — if docs/ doesn't exist or isn't writable)
 ```
 
-Before writing the checkpoint, verify that `docs/.audit-checkpoint.md` is listed in `.gitignore`. If it's not, add it — checkpoint files are temporary and should never be committed.
+Before writing the checkpoint, verify that `docs/.audit-checkpoint.md` is listed in `.gitignore`. If it's not, add it — checkpoint files are temporary and should never be committed. If the project has no `.gitignore`, create one with `docs/.audit-checkpoint.md` as its first entry.
 
 Checkpoint format:
 ```markdown
@@ -142,10 +148,12 @@ Create `docs/audits/` if it doesn't exist. After saving both files, inform the u
 ### Depth rule
 
 - **Files < 200 LOC**: full read
-- **Files 200-500 LOC**: full read for critical files (entry points, auth, config), sampling for the rest
+- **Files 200-500 LOC**: full read for critical files (see below), sampling for the rest
 - **Files > 500 LOC**: sampling of key sections (imports, exports, public functions, error handling)
 
-**Large repos (>50k LOC):** Focus depth on critical paths (auth, data persistence, external integrations) and use git churn data from Phase 1 to prioritize which modules get full analysis vs. sampling. Breadth-first scan everything, depth-first only where risk or churn is high.
+**Critical files** — always full read regardless of size: files handling authentication, authorization, payment/billing, PII/sensitive data, external API integrations, database writes, or files imported by >10 other modules. When in doubt, check git churn — high-churn files are likely critical.
+
+**Large repos (>50k LOC):** Focus depth on critical files and use git churn data from Phase 1 to prioritize which modules get full analysis vs. sampling. Breadth-first scan everything, depth-first only where risk or churn is high.
 
 ---
 
@@ -163,6 +171,7 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
 
 3. **Verify each finding against the codebase.** For each finding that is not already marked RESOLVED:
    - Read the referenced file and line(s)
+   - If the file no longer exists, check for renames (`git log --follow --diff-filter=R -- <old-path>`). If deleted, mark as RESOLVED with note "file removed". If renamed, update the location and continue verification at the new path.
    - Check if the reported problem still exists
    - Determine status: `RESOLVED`, `PERSISTS`, `IMPROVED`, `WORSENED`
    - For RESOLVED: verify the fix is correct, not just that the code changed
@@ -262,19 +271,22 @@ Map the project before analyzing code:
 
 1. **Overall structure**: List the directory structure (2-3 levels). Is it coherent? Does it follow a recognizable convention (monorepo, feature-based, layer-based)?
 2. **Tech stack**: Identify languages, frameworks, databases, external services from config files (package.json, requirements.txt, docker-compose, etc.)
-3. **Dependencies**: Review the dependency tree. Are there outdated, deprecated, duplicated, or vulnerable dependencies? (complement with Phase 0 results)
-4. **Configuration and CI/CD**: Is there a CI pipeline? Linting? Formatting? Type checking? Automated tests in CI?
-5. **Existing documentation**: Is there a useful README? Architecture docs? ADRs (Architecture Decision Records)?
-6. **Size and complexity**: Count files, approximate lines of code, and number of modules/services.
-7. **Git history analysis**: Git history reveals problems that static code doesn't show. Run:
+3. **Dependencies**: Review the dependency tree. Are there outdated, deprecated, duplicated, or vulnerable dependencies? (complement with Phase 0 results). Check version pinning: are dependencies pinned to exact versions or using ranges (`^`, `~`, `>=`)? Loose ranges risk pulling breaking changes silently.
+4. **License compliance**: Check dependency licenses for copyleft contamination. Flag GPL, AGPL, SSPL, or other copyleft licenses in projects that aren't themselves copyleft. Tools: `npx license-checker --summary`, `pip-licenses --format=table`, or manual inspection of LICENSE files in key dependencies.
+5. **Configuration and CI/CD**: Is there a CI pipeline? Linting? Formatting? Type checking? Automated tests in CI?
+6. **Existing documentation**: Is there a useful README? Architecture docs? ADRs (Architecture Decision Records)?
+7. **Size and complexity**: Count files, approximate lines of code, and number of modules/services.
+8. **Git history analysis**: Git history reveals problems that static code doesn't show. Run:
 
 ```bash
 # Hotspots: files with the most changes (last 3 months)
 git log --since="3 months ago" --pretty=format: --name-only | grep -v '^$' | sort | uniq -c | sort -rn | head -20
 
 # Bus factor: unique HUMAN contributors to critical files
-# LLM-generated commits (Co-Authored-By: Claude, etc.) don't count — bus factor measures human knowledge
-git log --pretty=format:"%an" -- <critical-file> | sort -u | wc -l
+# Exclude AI-assisted commits — bus factor measures human knowledge
+git log --pretty=format:"%H %an" -- <critical-file> | while read hash author; do
+  git log -1 --format="%b" "$hash" | grep -iq "co-authored-by:.*\(claude\|copilot\|cursor\|anthropic\|openai\|ai\)" || echo "$author"
+done | sort -u | wc -l
 
 # Large commits without review (possible LLM dumps)
 git log --oneline --shortstat | head -40
@@ -289,7 +301,7 @@ Analyze:
 - **Commit patterns**: Large commits without review, force pushes, direct commits to main/staging
 - **Stale code**: Files nobody touches for months may be dead code or ticking time bombs
 
-8. **Project instructions**: Read `CLAUDE.md`, `.claude/` directory, and any project-level instruction files. These often contain architectural decisions, known bugs, conventions, and constraints that are critical context for the audit. Incorporate relevant findings (e.g., documented workarounds, intentional tech debt, deployment constraints).
+9. **Project instructions**: Read `CLAUDE.md`, `.claude/` directory, and any project-level instruction files. These often contain architectural decisions, known bugs, conventions, and constraints that are critical context for the audit. Incorporate relevant findings (e.g., documented workarounds, intentional tech debt, deployment constraints).
 
 Produce an executive summary of the reconnaissance before continuing.
 
@@ -303,6 +315,7 @@ Security comes first because a critical finding here can invalidate everything e
 - Are there secrets, API keys, tokens, or credentials in the code or committed files?
 - Does `.gitignore` cover `.env`, credentials, and sensitive files?
 - Are there secrets in git history even if they're no longer in the current code?
+- **Complementary tools**: If available, suggest running `trufflehog` or `gitleaks` for deep secret scanning (git history, binary files, encoded secrets). These catch patterns that manual grep misses.
 
 #### 2.2 Inputs and validation
 - Are external inputs (API, forms, URL params, headers) validated and sanitized?
@@ -498,7 +511,16 @@ gh label create "medium" --description "Medium severity" --color "fbca04" 2>/dev
 gh label create "low" --description "Low severity" --color "0e8a16" 2>/dev/null || true
 ```
 
-For each finding in the selected severities, create a GitHub issue. Each issue must be **self-contained** — someone (or an agent) should be able to pick it up and execute without reading the full audit report or asking clarifying questions.
+**Before creating issues, check for existing duplicates.** Run `gh issue list --label audit --state open` and compare open audit issues against the findings to create. Skip any finding already covered by an open issue (note it in the summary as "already tracked in #N").
+
+**Then, group related findings.** Scan all findings in the selected severities and merge those that share the same root cause or fix into a single issue. Criteria for grouping:
+- Same fix pattern applied to multiple locations (e.g., H-1 + H-2 both need `asyncio.Lock` on global state → one issue)
+- Same category of problem across files (e.g., M-2 + M-3 both sanitize error messages → one issue)
+- Findings that must be fixed together to be meaningful
+
+Grouped issues use the **highest severity** of the group as their label, list all finding IDs in the title (e.g., `[Audit] H-1, H-2: Add asyncio.Lock to global state dicts`), and include each finding's location and code in the body.
+
+Each issue must be **self-contained** — someone (or an agent) should be able to pick it up and execute without reading the full audit report or asking clarifying questions.
 
 **Method:** Use the **Write** tool to create a temp file with the issue body, then `gh issue create --body-file`. This avoids shell quoting issues with backticks and special characters in code snippets.
 
@@ -561,7 +583,7 @@ step by step with enough detail to implement without ambiguity.
 **Estimate:** ~small / ~medium / ~large
 
 ---
-*Generated by codebase-audit v3.4.1*
+*Generated by codebase-audit v3.5.0*
 ```
 
 **Issue quality rules:**
@@ -569,7 +591,7 @@ step by step with enough detail to implement without ambiguity.
 - **Current code is mandatory.** Always include the actual problematic snippet, not a description of it.
 - **Suggested fix must be concrete.** Show code, not "improve error handling". If multiple approaches exist, pick one and explain why.
 - **Acceptance criteria must be testable.** Not "code is better" — specific conditions that can be verified.
-- **Group related findings** into a single issue when it makes sense (e.g., multiple auth problems → "Harden authentication layer"). List each finding with its ID in the issue body.
+
 Report to the user how many issues were created and their URLs.
 
 ---
@@ -588,7 +610,7 @@ Each finding must include a **severity**:
 ```
 # Codebase Audit: [Project Name]
 Date: [date]
-Auditor: Claude (codebase-audit v3.4.1)
+Auditor: Claude (codebase-audit v3.5.0)
 Scope: [what was reviewed and what wasn't]
 Last updated: [date] — [update context]
 
@@ -658,7 +680,7 @@ Machine-readable block for cross-audit comparison. DO NOT delete or manually edi
 ​```yaml
 # audit-metrics (used by future audits for automatic comparison)
 date: YYYY-MM-DD
-version: 3.4.1
+version: 3.5.0
 scope: full
 grade: X
 findings:
@@ -694,6 +716,8 @@ Instead of an arbitrary rating, use this rubric with objective criteria:
 | **C — Needs attention** | ≤1 CRITICAL, ≤10 HIGH. Tests >30%. Partial CI. Outdated docs. Complex setup. |
 | **D — High risk** | 2+ CRITICAL or >10 HIGH. Tests <30%. No CI or broken CI. No docs. Non-reproducible setup. |
 | **F — Critical** | Active vulnerabilities, exposed data, or unstable system in production. Requires emergency action. |
+
+**Maturity context:** Adjust expectations based on project age. An early-stage MVP (< 6 months) naturally carries more HIGH findings than a mature production system. Note the project's maturity in the executive summary and factor it into the grade — e.g., "Grade B, appropriate for a 3-month-old project that would need to reach A before scaling."
 
 ---
 
