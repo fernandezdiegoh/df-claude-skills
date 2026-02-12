@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.4.0
+- Added Tool preference section: prefer Glob/Grep/Read over bash grep/find (macOS compatibility)
+- Phase 4.1 LLM detection now uses Grep/Glob tool references instead of `grep -P` (not available on macOS)
+- Improved parallelization: Phase 2 (security) moved to Group 1 (no dependency on Phase 0/1)
+- Added `module:<path>` scope delegation clarification
+- Added Phase 0 fallback: missing tools noted as SKIPPED, don't block the audit
+- Reconcile mode now saves `YYYY-MM-DD-reconcile.md` snapshot for historical tracking
+- Checkpoint: explicit step to verify `.gitignore` includes `docs/.audit-checkpoint.md`
+- Stale code detection: replaced `/tmp/recent-files.txt` with `comm` one-liner (no temp file collision)
+- Added large repos guidance (>50k LOC): prioritize by churn + critical paths
+- Exit checklist rewritten as imperative numbered steps
+- Phase 4.1 automated detection reformulated from pseudo-syntax to natural language table
+- Phase 1 step 8: read CLAUDE.md / `.claude/` for project decisions, known bugs, conventions
+- Added `reconcile` as valid naming suffix in report storage section
+- Fixed exit checklist reference from "Phase 1.7" to "Phase 1, step 7"
+
 ### codebase-audit v3.3.0
 - Added `reconcile` mode: verify existing findings against current code, update statuses
 - Reconcile skips the full audit — only checks if open findings are resolved/improved/worsened

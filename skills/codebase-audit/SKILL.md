@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.3.0
+version: 3.4.0
 language: en
 category: audit
 ---
@@ -36,6 +36,8 @@ By default, the audit is **full** (all phases, entire codebase). If the user spe
 
 **Note:** Phase 0 (automated checks) always runs against the entire project, regardless of scope. Linters, type checkers, and test suites need the full context to produce reliable results.
 
+**`module:<path>` scope:** All phases run but filtered to the specified path. Phase 0 still runs against the full project (tools need full context). Subagents receive the path filter and only analyze files within it.
+
 When the scope is partial, the report must state it clearly. For sections not applicable to the project (e.g., 2.6 if no Docker, 3.5 if no DB, 3.7 if no frontend), include an explicit skip line:
 
 ```
@@ -44,6 +46,18 @@ When the scope is partial, the report must state it clearly. For sections not ap
 ```
 
 Do not silently omit sections or fill them with generic content.
+
+---
+
+## Tool preference
+
+**When running inside Claude Code, prefer built-in tools over bash:**
+- Use **Glob** (not `find`) for file discovery
+- Use **Grep** (not `grep`/`rg`) for content and pattern search
+- Use **Read** (not `cat`/`head`/`tail`) for reading files
+- Fall back to bash only for operations that require shell execution (e.g., `git log`, `npm audit`, `ruff check`)
+
+The bash examples in this skill are provided as reference for what to check, not as literal commands to run.
 
 ---
 
@@ -58,12 +72,14 @@ To maintain quality across all phases:
 Use the **Task tool** to delegate independent phases to subagents working in parallel:
 
 ```
-Group 1 (parallel): Phase 0 (automated checks) + Phase 1 (reconnaissance)
-Group 2 (parallel): Phase 2 (security) + Phase 3 (architecture) + Phase 3.7 (frontend)
+Group 1 (parallel): Phase 0 (automated checks) + Phase 1 (reconnaissance) + Phase 2 (security)
+Group 2 (parallel): Phase 3 (architecture) + Phase 3.7 (frontend)
 Group 3 (sequential): Phase 4 (quality) — needs Phase 0 results
 Group 4 (parallel): Phase 5 (operability) + Phase 6 (tech debt)
 Final (sequential): Report consolidation + Phase 7 (issues)
 ```
+
+Phase 2 (security) analyzes code directly and does not depend on Phase 0 or Phase 1 results, so it can start immediately.
 
 Each subagent must return findings in a structured format (severity, location, problem, impact, remediation) so the final report can consolidate them.
 
@@ -72,9 +88,11 @@ Each subagent must return findings in a structured format (severity, location, p
 Save progress after each phase to a file so you don't depend on context:
 
 ```
-docs/.audit-checkpoint.md    (preferred — survives reboots, add to .gitignore)
+docs/.audit-checkpoint.md    (preferred — survives reboots)
 /tmp/audit-checkpoint.md     (fallback — if docs/ doesn't exist or isn't writable)
 ```
+
+Before writing the checkpoint, verify that `docs/.audit-checkpoint.md` is listed in `.gitignore`. If it's not, add it — checkpoint files are temporary and should never be committed.
 
 Checkpoint format:
 ```markdown
@@ -101,7 +119,7 @@ docs/audits/
 └── latest.md                  # always the current audit (overwritten)
 ```
 
-**Naming:** `YYYY-MM-DD.md` for full audits. `YYYY-MM-DD-<scope>.md` for partial scopes (e.g., `2026-03-15-security.md`, `2026-04-01-frontend.md`).
+**Naming:** `YYYY-MM-DD.md` for full audits. `YYYY-MM-DD-<scope>.md` for partial scopes and reconciliations (e.g., `2026-03-15-security.md`, `2026-04-01-frontend.md`, `2026-04-10-reconcile.md`).
 
 **`latest.md`:** After saving the dated report, copy it to `docs/audits/latest.md` (overwrite). This is the stable reference that other files (CLAUDE.md, scripts, CI) should point to — it never requires updating references when a new audit is created.
 
@@ -118,6 +136,8 @@ Create `docs/audits/` if it doesn't exist. After saving both files, inform the u
 - **Files < 200 LOC**: full read
 - **Files 200-500 LOC**: full read for critical files (entry points, auth, config), sampling for the rest
 - **Files > 500 LOC**: sampling of key sections (imports, exports, public functions, error handling)
+
+**Large repos (>50k LOC):** Focus depth on critical paths (auth, data persistence, external integrations) and use git churn data from Phase 1 to prioritize which modules get full analysis vs. sampling. Breadth-first scan everything, depth-first only where risk or churn is high.
 
 ---
 
@@ -145,7 +165,9 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
    - Update the YAML metrics block (finding counts by severity)
    - Do NOT add new findings — that's what a full audit is for
 
-5. **Produce a summary.**
+5. **Save a reconciliation snapshot.** Copy the updated `latest.md` to `docs/audits/YYYY-MM-DD-reconcile.md`. This provides a historical record of when findings were resolved, separate from full audit archives.
+
+6. **Produce a summary.**
 
 ```markdown
 ## Reconciliation summary — [date]
@@ -215,6 +237,8 @@ Before the manual audit, run the automated tools available in the project. Don't
 4. **Dependency audit**: Run `npm audit`, `pip audit`, or equivalent. Record known vulnerabilities by severity.
 5. **Coverage**: If coverage is configured, record the current percentage and uncovered areas.
 
+If a tool is not installed or fails to run, note it as **SKIPPED** with the reason. Do not block the audit on a single missing tool — record what you couldn't check and move on.
+
 Report Phase 0 results as part of the reconnaissance. Errors found here are incorporated directly into findings without additional manual analysis.
 
 ---
@@ -242,10 +266,7 @@ git log --pretty=format:"%an" -- <critical-file> | sort -u | wc -l
 git log --oneline --shortstat | head -40
 
 # Stale code: tracked files nobody modified in 6+ months
-# Step 1: list recently modified files
-git log --since="6 months ago" --pretty=format: --name-only | grep -v '^$' | sort -u > /tmp/recent-files.txt
-# Step 2: compare against all tracked files
-git ls-files | grep -vFf /tmp/recent-files.txt | head -30
+comm -23 <(git ls-files | sort) <(git log --since="6 months ago" --pretty=format: --name-only | grep -v '^$' | sort -u) | head -30
 ```
 
 Analyze:
@@ -253,6 +274,8 @@ Analyze:
 - **Bus factor**: Modules touched by a single contributor are a risk
 - **Commit patterns**: Large commits without review, force pushes, direct commits to main/staging
 - **Stale code**: Files nobody touches for months may be dead code or ticking time bombs
+
+8. **Project instructions**: Read `CLAUDE.md`, `.claude/` directory, and any project-level instruction files. These often contain architectural decisions, known bugs, conventions, and constraints that are critical context for the audit. Incorporate relevant findings (e.g., documented workarounds, intentional tech debt, deployment constraints).
 
 Produce an executive summary of the reconnaissance before continuing.
 
@@ -359,26 +382,17 @@ This section is specific to detecting patterns in LLM-generated code. It applies
 
 **Automated detection — run these checks before manual analysis:**
 
-```bash
-# Abandoned placeholders (Python)
-grep -rn "TODO\|FIXME\|HACK\|XXX\|TEMP\|raise NotImplementedError\|\.\.\.  # " --include="*.py"
-grep -Prn "^\s*pass\s*$" --include="*.py"
+Use **Grep** and **Glob** tools (not bash `grep`/`find`) for these checks. Search for:
 
-# Abandoned placeholders (TypeScript/JavaScript)
-grep -rn "// TODO\|// FIXME\|// HACK\|console\.log\|throw new Error.*not implemented\|throw new Error.*todo" --include="*.ts" --include="*.tsx" --include="*.js"
-
-# Over-engineering: files with unnecessary enterprise patterns
-find . -name "*Factory*" -o -name "*Strategy*" -o -name "*Adapter*" -o -name "*Builder*" -o -name "*Abstract*" | grep -v node_modules | grep -v __pycache__
-
-# Empty or trivial tests
-grep -rn "toBeTruthy\|toBeDefined\|toBeUndefined\|assertIsNotNone\|assert.*is not None$\|expect(true)" tests/ --include="*.py" --include="*.ts" --include="*.tsx"
-
-# Phantom dependencies: imports of undeclared packages
-# (compare imports vs requirements.txt / package.json manually)
-
-# Bloated documentation: docstrings that just repeat the name
-grep -rn '"""[A-Z]' --include="*.py" -A1 | head -30
-```
+| What to find | Pattern (regex) | Filter |
+|---|---|---|
+| Abandoned placeholders (Python) | `TODO\|FIXME\|HACK\|XXX\|TEMP\|raise NotImplementedError` | `*.py` |
+| Bare `pass` statements | `^\s*pass\s*$` | `*.py` |
+| Abandoned placeholders (JS/TS) | `// TODO\|// FIXME\|// HACK\|console\.log\|throw new Error.*(not implemented\|todo)` | `*.{ts,tsx,js}` |
+| Over-engineering patterns | Use **Glob** for files matching `**/*Factory*`, `**/*Strategy*`, `**/*Adapter*`, `**/*Builder*`, `**/*Abstract*` | Exclude `node_modules`, `__pycache__` |
+| Empty or trivial tests | `toBeTruthy\|toBeDefined\|toBeUndefined\|assertIsNotNone\|assert.*is not None$\|expect\(true\)` | `*.{py,ts,tsx}` in `tests/` |
+| Bloated docstrings | `"""[A-Z]` (review first ~30 matches with context) | `*.py` |
+| Phantom dependencies | Compare imports against `requirements.txt` / `package.json` manually | — |
 
 **Manual analysis after the checks:**
 
@@ -516,7 +530,7 @@ step by step with enough detail to implement without ambiguity.
 **Estimate:** ~small / ~medium / ~large
 
 ---
-*Generated by codebase-audit v3.3.0*
+*Generated by codebase-audit v3.4.0*
 EOF
 )" \
   --label "audit,<severity>"
@@ -547,7 +561,7 @@ Each finding must include a **severity**:
 ```
 # Codebase Audit: [Project Name]
 Date: [date]
-Auditor: Claude (codebase-audit v3.3.0)
+Auditor: Claude (codebase-audit v3.4.0)
 Scope: [what was reviewed and what wasn't]
 Last updated: [date] — [update context]
 
@@ -617,7 +631,7 @@ Machine-readable block for cross-audit comparison. DO NOT delete or manually edi
 ​```yaml
 # audit-metrics (used by future audits for automatic comparison)
 date: YYYY-MM-DD
-version: 3.3.0
+version: 3.4.0
 scope: full
 grade: X
 findings:
@@ -658,22 +672,22 @@ Instead of an arbitrary rating, use this rubric with objective criteria:
 
 ## Exit checklist
 
-Before delivering the report, verify you completed everything:
+Before delivering the report, verify each item:
 
-- [ ] Ran automated checks (Phase 0) or explained why I couldn't
-- [ ] Searched for previous audits and compared progress with diff table (or indicated none exist)
-- [ ] Completed all phases applicable to the scope
-- [ ] Each finding has an ID, location, problem, impact, remediation, and effort estimate
-- [ ] Findings are classified by severity (CRITICAL/HIGH/MEDIUM/LOW)
-- [ ] Verified no secrets or credentials are exposed
-- [ ] Ran the LLM detection grep patterns (Phase 4.1)
-- [ ] Analyzed git history for churn and bus factor (Phase 1.7)
-- [ ] The remediation roadmap is realistic and prioritized
-- [ ] The overall assessment uses the objective rubric (A-F), not an arbitrary rating
-- [ ] The YAML metrics block is complete and parseable
-- [ ] The report is actionable — someone can pick it up and start executing without asking questions
-- [ ] Saved the final report to `docs/audits/YYYY-MM-DD.md` AND copied to `docs/audits/latest.md`
-- [ ] Saved the final checkpoint to `docs/.audit-checkpoint.md` (or `/tmp/` as fallback)
+1. Run automated checks (Phase 0) — or document why you couldn't
+2. Search for previous audits and include the progress diff table (or state none exist)
+3. Complete all phases applicable to the scope
+4. Assign every finding an ID, location, problem, impact, remediation, and effort estimate
+5. Classify all findings by severity (CRITICAL/HIGH/MEDIUM/LOW)
+6. Verify no secrets or credentials are exposed in the report itself
+7. Run the LLM detection patterns (Phase 4.1)
+8. Analyze git history for churn and bus factor (Phase 1, step 7)
+9. Build a realistic, prioritized remediation roadmap
+10. Grade the codebase using the objective rubric (A-F)
+11. Fill the YAML metrics block completely and verify it parses
+12. Confirm the report is actionable — someone can pick it up and execute without asking questions
+13. Save the final report to `docs/audits/YYYY-MM-DD.md` AND copy to `docs/audits/latest.md`
+14. Verify `docs/.audit-checkpoint.md` is in `.gitignore`, then save the checkpoint
 
 ---
 
