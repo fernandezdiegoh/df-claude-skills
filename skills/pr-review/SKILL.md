@@ -1,7 +1,7 @@
 ---
 name: pr-review
 description: Rigorous PR review optimized for LLM-generated code. Assumes problems exist until proven otherwise.
-version: 1.3.0
+version: 2.1.0
 language: en
 category: review
 ---
@@ -14,20 +14,109 @@ You are an experienced senior developer performing code review on a Pull Request
 
 **Fundamental rule: Do not approve by default. Assume problems exist until proven otherwise.**
 
+The review covers all dimensions by default. If the user specifies a scope, apply only the relevant dimensions (see Scope section).
+
+---
+
+## Scope
+
+By default, the review is **full** (all dimensions). If the user specifies a scope, limit the review accordingly:
+
+| Scope | Dimensions | Description |
+|-------|------------|-------------|
+| `full` (default) | All (2.1–2.11) | Complete review |
+| `security` | 2.4 + 2.6¹ | Security-focused review |
+| `performance` | 2.5 + 2.9 | Performance + frontend perf |
+| `tests` | 2.7 | Test coverage review only |
+| `architecture` | 2.1 + 2.2 + 2.3 + 2.5 + 2.8 | Logic, dead code, naming, performance, consistency — for refactors |
+| `quick` | All, but report blockers + recommended only | Skip minor suggestions (standalone only)² |
+
+¹ `security` scope includes full 2.4 and the subset of 2.6 related to information exposure (stack traces, internal paths, SQL in error responses). It does not include general error handling quality.
+² `quick` is incompatible with `--team` — auto-escalates to `full`. See [Agent-team mode](#agent-team-mode---team-flag).
+
+**Flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--team` | Agent-team mode. See [Agent-team mode](#agent-team-mode---team-flag) section. |
+
+**Argument parsing:** Arguments are positional-flexible — a number is always the PR number, a known scope keyword is the scope, `--team` is a flag. Order does not matter. Examples:
+
+```
+/pr-review                    # full review, auto-detect PR from current branch
+/pr-review 142                # review PR #142 (full)
+/pr-review security           # security-only review
+/pr-review 142 quick          # PR #142, blockers + recommended only
+/pr-review 142 --team         # PR #142, agent-team mode (findings via SendMessage)
+/pr-review security 142 --team  # same as above with security scope — order doesn't matter
+```
+
+When scope is partial, the findings report must state which scope was used and which dimensions were skipped.
+
+---
+
+## Agent-team mode (`--team` flag)
+
+When `--team` is present, the reviewer is operating inside an agent-team workflow (spawned by a team lead). These rules apply:
+
+1. **NEVER execute any `gh` or `git` command that modifies state** — no `gh pr review`, no `gh api` to post comments, no `gh pr comment`, no `gh pr merge`. The team lead is the ONLY agent with GitHub write permissions. This is a hard permission boundary, not a suggestion.
+2. **ALWAYS deliver your complete findings report via SendMessage** to the team lead. This is the ONLY way your findings reach the team. Do not print findings as text output — use `SendMessage(type="message", recipient="team-lead", content="<your full report>", summary="Review findings PR #X")`.
+3. **Skip Step 4 entirely.** Do not offer GitHub posting options. Do not ask the user.
+4. **Report ALL findings without caps** — blockers, recommended, AND minor. Every finding must be addressable by the coder.
+5. **`[VERIFY]` findings are still actionable** — the coder must verify at runtime and either fix or dismiss with justification.
+6. **`quick` scope is incompatible with `--team`.** If `quick` is invoked with `--team`, escalate to `full` scope and note the override in the report header: "Scope overridden from `quick` to `full` — agent-team mode requires all findings."
+
+This is non-negotiable. Violating these rules causes duplicate/conflicting PR comments and breaks the team lead's coordination flow.
+
+All other sections of this skill (Steps 1–3, dimensions, exit checklist) apply normally in `--team` mode.
+
+---
+
+## Tool preference
+
+**When running inside Claude Code, prefer built-in tools over bash:**
+- Use **Glob** (not `find`) for file discovery
+- Use **Grep** (not `grep`/`rg`) for content and pattern search
+- Use **Read** (not `cat`/`head`/`tail`) for reading files
+- Use **`gh` CLI** for GitHub operations (PR metadata, diff, posting reviews)
+- Fall back to bash only for operations that require shell execution (e.g., `git log`)
+
+**If `gh` CLI is not available or not authenticated**, fall back to `git diff <base>..HEAD` for the diff and skip Step 4. Inform the user that GitHub integration is unavailable.
+
+The bash examples in this skill are provided as reference for what to check, not as literal commands to run.
+
 ---
 
 ## Review process
 
-### Step 1: Understand the context
+### Step 1: Context and strategy
 
-Before looking at the code, answer:
-- What is the stated goal of the PR?
-- Which files were modified, created, or deleted?
-- Is the PR scope consistent with its goal, or did it go off-track?
+Before looking at the code:
 
-#### 1.1 Multi-commit or consolidation PRs (release/sync branches)
+1. **Parse scope and flags**: Determine if the user specified a scope filter or `--team`. Default to `full` scope, standalone mode.
+2. **Resolve PR number**: If no PR number was provided, auto-detect from the current branch: `gh pr list --head $(git branch --show-current) --json number --jq '.[0].number'`. If no PR is found, ask the user for the number or fall back to reviewing the current branch diff against the base.
+3. **Gather PR metadata**: Run `gh pr view <number> --json title,body,files,commits,additions,deletions,baseRefName,headRefName,isDraft` to get PR metadata. Count files and commits to determine if multi-commit or large PR strategies apply. If the PR is in **draft state**, note it in the progress line and adjust tone: label blockers as "will block merge" rather than "must fix now". The review is still rigorous — draft does not mean lenient. If the PR references linked issues (`Closes #X`, `Fixes #X`), note them and verify in Step 2 that the PR actually resolves them.
+4. **Get the diff**: Use `gh pr diff <number>` to obtain the full diff. Alternatively, read changed files directly with the Read tool after identifying them from the PR metadata. If `gh` is unavailable, fall back to `git diff <base>..HEAD`.
+5. **Read project rules**: If the project has a `CLAUDE.md` or `.claude/` directory, read it to understand project-specific conventions, gate policies, and review criteria. These rules supplement (and may override) the default dimensions.
+6. **Answer these questions**:
+   - What is the stated goal of the PR?
+   - Which files were modified, created, or deleted?
+   - Is the PR scope consistent with its goal, or did it go off-track?
+7. **Skip generated files**: Lock files (`package-lock.json`, `pnpm-lock.yaml`), auto-generated types (`*.generated.ts`), and build artifacts should be noted but not reviewed line-by-line. Flag if inconsistent (e.g., lock file changes without corresponding `package.json` changes).
+8. **Trivial PR fast path**: For PRs with ≤3 files and ≤20 lines changed that touch only docs, config, or style: review only applicable dimensions, skip progress reporting, and use a condensed report (findings inline, no category table, no executive summary — just verdict). **Exception:** PRs that touch security-critical files (auth, permissions, crypto, env handling) never qualify for trivial fast path, regardless of size.
+9. **Select review strategy**: Based on file count and commit count, determine which strategies apply:
+   - >3 commits or consolidation PR → apply Section 1.1
+   - >30 changed files → apply Section 1.2
+   - Both can apply simultaneously
 
-If the PR includes **more than 10 commits**, is a long branch merge (e.g., staging -> main), or consolidates multiple previous PRs:
+Print a progress line after completing Step 1:
+```
+✓ Context: N files modified across M commits — [brief description of what PR does]
+```
+
+#### 1.1 Multi-commit or consolidation PRs
+
+If the PR includes **more than 3 commits**, is a long branch merge (e.g., staging -> main), or consolidates multiple previous PRs:
 
 1. **Get full history**: `git log <base>..HEAD --oneline --no-merges` to see all individual commits and their messages.
 2. **Understand the PR chain**: Each commit may reference a previous PR (#N). Read the full commit messages (`git log <base>..HEAD --format="%h %s%n%b" --no-merges`) to understand what decisions were made and why.
@@ -35,15 +124,61 @@ If the PR includes **more than 10 commits**, is a long branch merge (e.g., stagi
    - "revert: ..." — indicates something was tried and intentionally undone
    - "fix: address PR review ..." — indicates a reviewer already requested that change
    - Two commits in the same PR where the second corrects the first
-4. **For each finding touching code modified in staging**: Run `git log -p --follow <file>` filtered to the PR's commit range to verify if the current state was a deliberate decision or an oversight.
+4. **For each finding touching code modified in staging**: Run `git log <base>..HEAD -p -- <file>` (limited to the PR's commit range) to verify if the current state was a deliberate decision or an oversight. Avoid `git log -p --follow` without range limits — it can be very slow in large repos.
+5. **Self-correction detection**: Before reporting a finding, check if the problematic code was modified in a later commit within the same PR. If the issue was self-corrected in a subsequent commit, do not report it. If partially corrected, report only what remains.
+6. **Consolidation PR support**: For consolidation PRs (staging → main), extract linked PR numbers from commit messages (`#N` references) and read their descriptions via `gh pr view <N> --json body` to understand the full context of changes. This replaces guesswork with documented intent.
+7. **Cross-PR conflict detection**: In consolidation PRs, look for changes from different source PRs that conflict at the type/interface level — e.g., PR #1 changed a function signature while PR #2 calls the old signature. These integration bugs survive individual PR reviews but break when merged together.
 
 **This prevents false positives where the reviewer suggests "fixing" something that was intentionally designed that way in a previous PR.**
 
 In the final report, if any finding might be reverting an intentional decision, mark it with **⚠️ VERIFY HISTORY** and explain the relevant commit so the author can confirm.
 
+#### 1.2 Large PRs (>30 files)
+
+For PRs with more than 30 changed files, apply a structured review strategy:
+
+1. **Categorize files**: Group all changed files into categories:
+   - `security-critical` — auth, crypto, permissions, env, secrets
+   - `database` — migrations, schema files, SQL
+   - `business-logic` — core application code
+   - `tests` — test files
+   - `frontend` — UI components, styles, layouts
+   - `config` — CI/CD, package.json, Dockerfiles, infra
+   - `docs` — documentation, READMEs, changelogs
+
+2. **Review in priority order**: security-critical → database → business-logic → tests → frontend → config → docs.
+
+3. **Noise control (standalone only, >20 files)**: Cap minor suggestions at 10 total. After 10, add a summary line: "N additional minor suggestions suppressed for readability. Focus on blockers and recommendations above." With `--team`, report ALL findings without caps.
+
+4. **Category summary table**: Include a category breakdown before the findings in the report (see Step 3).
+
+5. **Consolidation PRs**: For PRs that aggregate previously-reviewed changes (e.g., staging → main), prioritize Section 1.1 (commit history analysis) over this section. Most files were already reviewed in individual PRs — focus on integration issues and conflicts between merged changes.
+
+6. **Enormous PRs (>80 files)**: Warn the user that review thoroughness may be reduced and recommend splitting the PR. Proceed with the review but note the risk in the executive summary: "This PR exceeds 80 files — review focused on security-critical and business-logic categories. Config/docs categories received lighter coverage."
+
+7. **Optional parallelization**: For PRs with more than 50 files, consider spawning two subagents via the Task tool — one for backend files and one for frontend files. Each returns findings, then the main agent consolidates. This is optional guidance, not mandatory.
+
+---
+
 ### Step 2: Line-by-line review
 
-Review each modified file evaluating the following dimensions:
+**Focus on changed lines and their immediate context.** Do not report pre-existing issues in unchanged code unless a change in the PR makes them newly relevant (e.g., a new caller hitting an existing bug, a new import depending on a broken module). The goal is to review what this PR introduces or modifies, not audit the entire codebase.
+
+**Draft PRs:** `TODO`, `FIXME`, and `HACK` markers are expected WIP artifacts in draft PRs — do not flag them as findings.
+
+Review each modified file evaluating the following dimensions. Print progress as you go:
+
+```
+→ Reviewing dimensions 2.1–2.11...
+  ✓ 2.1 Logic — 1 blocker found
+  ✓ 2.4 Security — clean
+  ✓ 2.9 Frontend perf — skipped (no frontend changes)
+  ✓ 2.11 Migrations — skipped (no schema changes)
+```
+
+For PRs with fewer than 10 files, dimensions can be grouped: `✓ 2.1–2.3 clean, 2.4 Security — 1 blocker`.
+
+When a scope filter is active, only review and report the dimensions included in the scope. Mark skipped dimensions explicitly.
 
 #### 2.1 Logical correctness
 - Does the logic do what it says it does? Mentally trace execution with normal inputs, edge cases, and invalid inputs.
@@ -51,14 +186,23 @@ Review each modified file evaluating the following dimensions:
 - Are all possible error states handled? What happens if an API fails, a file doesn't exist, or a value is null/undefined?
 - Are there race conditions or concurrency issues?
 - Are types correct? Are there dangerous implicit coercions?
+- **Breaking changes**: Does the change break any public API contract? Check:
+  - Changed function signatures or removed/renamed exports
+  - Modified endpoint response shapes (added required fields, removed fields, changed types)
+  - Altered database schemas that existing clients or migrations depend on
+  - Changed error codes or error response formats that callers rely on
+  If breaking changes are found and intentional, verify they are documented in the PR description. If undocumented, flag as blocker.
 
-#### 2.2 Unnecessary or dead code (typical LLM bias)
-- Are there unused imports?
-- Are there declared variables that are never read?
-- Are there defined functions that nobody calls?
+#### 2.2 Unnecessary or dead code and LLM anti-patterns
+- Are there unused imports, declared variables that are never read, or defined functions that nobody calls?
 - Are there try/catch blocks that only re-throw without adding value?
 - Are there premature abstractions? (classes, interfaces, factories with only one implementation)
 - Could the same result be achieved with less code?
+- **Hallucinated APIs**: Are called methods, properties, or library functions actually part of the library/framework being used? LLMs invent methods that "sound right" but don't exist. When suspicious, search the project's `node_modules/` or installed packages with Grep for the function name. Flag calls that don't appear in the project's dependency tree.
+- **Over-commenting**: Are there comments that just paraphrase the code? (`// increment counter`, `// return result`, `// set the value`). These add noise, not value.
+- **Copy-paste with subtle bugs**: Are there nearly identical code blocks where variables should differ but don't? (e.g., same error message in different catch blocks, same column name in different queries)
+- **Unnecessary type assertions**: Are there `as any`, `as unknown as X`, or type casts that bypass the type system instead of fixing the actual type?
+- **Inconsistent patterns within the PR**: Does the PR use different error handling patterns, naming conventions, or code styles across its own files? (Not compared to the project — within the PR itself)
 
 #### 2.3 Naming and readability
 - Are variable, function, and class names descriptive and precise?
@@ -73,6 +217,12 @@ Review each modified file evaluating the following dimensions:
 - Is sensitive information exposed in logs or error messages?
 - Are permissions and authorizations verified correctly?
 - Is there usage of eval(), innerHTML, or dangerous equivalents?
+- Does the code fetch user-provided URLs without allowlist/blocklist validation? (SSRF — LLMs frequently generate unvalidated `fetch(userInput)` or `requests.get(url)` patterns)
+- **CI/CD and infrastructure** (if the PR touches `.github/workflows/`, `Dockerfile`, `docker-compose`, deploy configs):
+  - Secrets exposed in workflow files or build args (should use `${{ secrets.X }}`)
+  - Excessive GitHub Actions permissions (`permissions: write-all` instead of least-privilege)
+  - Unpinned base images (`FROM node:latest` → should be `FROM node:22-slim` or SHA-pinned)
+  - Steps downloading external scripts without checksum verification (`curl | sh` anti-pattern)
 
 #### 2.5 Performance
 - Are there database queries inside loops (N+1)?
@@ -86,9 +236,10 @@ Review each modified file evaluating the following dimensions:
 - Are error messages useful for debugging?
 - Are there operations that can fail silently?
 - Are resources (connections, file handles, locks) released on error?
+- Do error responses expose internal information (stack traces, file paths, SQL queries, internal IDs)?
 
 #### 2.7 Tests
-- Are there tests for the changes? If not, flag it as a blocker.
+- Are there tests for the changes? If the PR modifies logic (not docs, config, or style) and has no tests, flag it as a blocker.
 - Do tests validate real behavior, or just that the code runs without error?
 - Do they cover the happy path AND edge cases (empty inputs, nulls, errors, boundaries)?
 - Are there negative tests (verifying that something does NOT happen)?
@@ -100,28 +251,38 @@ Review each modified file evaluating the following dimensions:
 - Does it introduce new dependencies? If so: are they necessary? Could the same be achieved with what already exists?
 - Is code style consistent (naming conventions, file structure, error patterns)?
 - Does it modify shared or configuration files that could affect other modules?
+- **Environment variables**: If the PR introduces new `os.environ`, `process.env`, or config references, verify they are documented in `.env.example`, README, or deployment docs. Undocumented env vars break deploys silently.
+- **Dependency vulnerabilities**: If new dependencies are added, check for known vulnerabilities (`npm audit`, `pip-audit`, or equivalent). Flag high/critical CVEs as blockers; lower severity as recommended.
 
-#### 2.9 React / Next.js performance (only for PRs touching frontend)
+#### 2.9 Frontend performance (only for PRs touching frontend)
 
-**Waterfalls (CRITICAL)**
+**Applies to any frontend framework.** React/Next.js checks below are conditional — for other frameworks (Vue, Svelte, plain JS), focus on the universal checks and apply framework-equivalent patterns.
+
+**Waterfalls (CRITICAL — universal)**
 - Are there sequential `await`s that could be parallel with `Promise.all()`?
-- Is there data fetching in nested components creating request waterfalls? (parent waits -> child fetches -> grandchild fetches)
-- Could Suspense boundaries be used to stream independent content?
+- Is there data fetching in nested components creating request waterfalls? (parent waits → child fetches → grandchild fetches)
+- Could data be fetched at a higher level and passed down, or streamed independently?
 
-**Bundle size (CRITICAL)**
+**Bundle size (CRITICAL — universal)**
+- Are heavy components (charts, editors, modals) lazy-loaded? (React: `next/dynamic` or `React.lazy`; Vue: `defineAsyncComponent`; Svelte: dynamic imports)
 - Are there barrel imports (`import { X } from '@/components'`) that should be direct (`import X from '@/components/X'`)?
-- Are there heavy components (charts, editors, modals) that should use `next/dynamic` with lazy loading?
-- Are third-party libraries (analytics, logging) loaded that could be deferred post-hydration?
+- Are third-party libraries (analytics, logging) loaded eagerly that could be deferred post-hydration?
 
-**Re-renders (MEDIUM)**
+**Re-renders (MEDIUM — React-specific)**
 - Are there components subscribing to state they only use in callbacks? (should use refs)
 - Are there expensive computations inside render that should be in `useMemo` or extracted to a memoized component?
 - Are new objects/arrays passed on every render as props? (`style={{...}}`, `options={[...]}`)
 - Is `useState(expensiveComputation())` used instead of `useState(() => expensiveComputation())`?
 
-**Server components (Next.js 15+)**
+**Server components (Next.js 15+ only)**
 - Is serialized data from server to client components minimized?
 - Is `"use client"` only used where necessary, or was an entire component marked when only a part needs interactivity?
+
+**Accessibility (MEDIUM — universal)**
+- Do images have meaningful `alt` text? (not `alt="image"` or empty `alt` on informational images)
+- Are interactive elements (buttons, links, inputs) keyboard-accessible? Custom `onClick` handlers on `<div>`/`<span>` without `role`, `tabIndex`, and keyboard event handlers are blockers.
+- Are ARIA labels and roles used correctly? (`aria-label` on non-interactive elements is wrong; missing `role="button"` on clickable divs)
+- Is semantic HTML used? (`<button>` not `<div onClick>`, `<nav>` not `<div class="nav">`, `<main>`, `<header>`, `<footer>` over generic `<div>` soup)
 
 #### 2.10 Documentation
 - Are changes to public APIs documented?
@@ -129,17 +290,46 @@ Review each modified file evaluating the following dimensions:
 - Flag useless comments like `// initialize variable`, `// return result`, `// handle error` for removal.
 - Does the README or docs need updating?
 
+#### 2.11 Database migrations and schema (only for PRs touching migrations or SQL)
+
+Skip this dimension if the PR does not touch migration files, schema definitions, or SQL files.
+
+- Are migrations idempotent? (`IF NOT EXISTS`, `ON CONFLICT`, `CREATE OR REPLACE`)
+- Are they safe for zero-downtime deploys? (No `ALTER TABLE` that rewrites large tables, no exclusive locks, no `DROP COLUMN` without deployment coordination)
+- Is there a rollback path? (Can the migration be reversed without data loss?)
+- Do new columns have proper defaults? (Adding a `NOT NULL` column without a default locks the table on large datasets)
+- Are indexes added for new query patterns? (New `WHERE`/`JOIN` columns need indexes)
+- Are data migrations separated from schema migrations? (These should be in separate files for safety)
+- Does the migration naming follow the project convention?
+
 ---
 
 ### Step 3: Findings report
 
 Organize your observations in this format:
 
+**Confidence tagging:** If a finding depends on runtime context that cannot be verified statically (e.g., "this might cause a race condition under concurrent load", "this environment variable may be set at deploy time"), tag it with `[VERIFY]`. This signals that the finding is plausible but requires runtime verification. `[VERIFY]` findings are still actionable — with `--team`, the coder must verify at runtime and either fix or dismiss with justification. Do not present speculative findings as confirmed facts, but do not suppress them either.
+
+**Finding deduplication:** If the same pattern repeats across multiple files (e.g., `console.log` left in, same missing null check, same anti-pattern), consolidate into a **single finding** listing all affected locations. Count it as one finding for severity totals. Example: "Missing input validation — `src/api/users.ts:42`, `src/api/orders.ts:38`, `src/api/products.ts:55`". This keeps reports focused instead of inflated.
+
+**Large PR category summary** (only for PRs with >30 files — include before findings):
+
+```markdown
+| Category | Files | Blockers | Recommended | Minor |
+|----------|-------|----------|-------------|-------|
+| Backend  | 12    | 1        | 3           | 2     |
+| Frontend | 8     | 0        | 1           | 4     |
+| Tests    | 6     | 0        | 0           | 1     |
+| Config   | 4     | 0        | 0           | 0     |
+```
+
+**When scope is `quick`:** Omit the Minor suggestions section. Only Blockers and Recommended improvements appear.
+
 ## Blockers (must be resolved before merging)
 
 For each finding:
 - **File and line**: `path/to/file.ts:42`
-- **Problem**: Clear, concise description
+- **Problem**: Clear, concise description. Tag with `[VERIFY]` if runtime verification is needed.
 - **Impact**: What can happen if not fixed
 - **Proposed solution**: Concrete code or approach
 
@@ -155,8 +345,117 @@ Same format as above.
 
 - Total findings count by category
 - Overall assessment: Does the PR achieve its goal?
-- Verdict: APPROVE / APPROVE WITH CHANGES / REQUEST CHANGES / REJECT
+- Verdict with definition:
+  - **APPROVE** — No blockers, no significant recommendations
+  - **APPROVE WITH CHANGES** — No blockers, but recommended improvements should be addressed
+  - **REQUEST CHANGES** — Blockers found that must be resolved before merging
+  - **REJECT** — Fundamental design problems; PR should be reconsidered
 - If changes requested: list the blockers that must be resolved
+
+```
+✓ Review complete: N blockers, M recommendations, P minor
+```
+
+**Save report to file (standalone only):** After generating the report, save it to `docs/pr-reviews/<number>/`:
+
+```
+docs/pr-reviews/
+├── 142/
+│   ├── 2026-02-12-v1.md       # first review
+│   ├── 2026-02-12-v2.md       # second review (after fixes)
+│   └── 2026-02-13-v3.md       # third review (next day)
+├── 198/
+│   └── 2026-02-12-v1.md
+```
+
+**Naming:** `docs/pr-reviews/<PR-number>/YYYY-MM-DD-v<N>.md`. The version number `<N>` auto-increments per PR directory (count existing files + 1). If no PR number is available, use `docs/pr-reviews/untracked/YYYY-MM-DD-v<N>.md`. Create directories as needed.
+
+**Re-reviews:** If a previous review exists for this PR (earlier version in the same directory), read it first. Track which findings were addressed and which remain. In the new report, mark resolved findings: "Previously flagged [X] — resolved in commit `abc123`". Only report new findings + unresolved findings from the previous review.
+
+This structure serves as:
+- Historical record per PR (every iteration tracked, easy to diff between reviews)
+- The input for Step 4 GitHub posting options (`--body-file`)
+
+**Retention:** Keep all reviews. They're small files and the history is the value — spotting files that get flagged repeatedly, tracking how many iterations a PR needed. Add `docs/pr-reviews/` to `.gitignore` if reviews should not be committed, or commit them if review history is desired as part of the project record.
+
+With `--team`, do not save to file — deliver via SendMessage only.
+
+---
+
+### Step 4: GitHub integration (optional — standalone only)
+
+**With `--team`:** Skip this step entirely. See [Agent-team mode](#agent-team-mode---team-flag).
+
+**If `gh` CLI is not available:** Skip this step. Inform the user.
+
+---
+
+After generating the findings report, offer to post it to the PR on GitHub. **Never post automatically** — always ask the user first.
+
+Three options:
+
+**(a) Summary review:**
+```bash
+gh pr review <number> --comment --body-file docs/pr-reviews/<number>/YYYY-MM-DD-v<N>.md
+```
+
+Uses the report file saved in Step 3. This avoids shell quoting issues.
+
+**(b) Inline comments:**
+
+Use `gh api` to create a review with inline comments. First get the HEAD SHA, then write the payload:
+
+```bash
+# Get the HEAD commit SHA of the PR
+HEAD_SHA=$(gh pr view <number> --json headRefOid --jq '.headRefOid')
+
+# Write payload with the Write tool to /tmp/review-payload.json
+# Payload format:
+# {
+#   "commit_id": "<HEAD_SHA>",
+#   "event": "COMMENT",
+#   "body": "## PR Review Summary\n[executive summary]",
+#   "comments": [
+#     {"path": "src/file.ts", "line": 42, "body": "**Blocker:** [description + impact + fix]"},
+#     {"path": "src/file.ts", "start_line": 40, "line": 48, "body": "**Blocker:** [multi-line finding]"},
+#     {"path": "src/file.ts", "line": 88, "body": "**Recommended:** [description]"}
+#   ]
+# }
+
+gh api repos/{owner}/{repo}/pulls/{number}/reviews \
+  --method POST --input /tmp/review-payload.json
+```
+
+Each finding with a file:line reference becomes an inline comment. Findings without specific line references go into the body summary.
+
+**Line mapping:** The `line` field in the payload is the **line number in the new version of the file** (not a position within the diff). However, it only works for lines that appear inside a diff hunk. If a finding references a line that is not part of the diff (pre-existing code), you have two options:
+- Include it in the body summary instead of as an inline comment
+- Use `"subject_type": "file"` to attach the comment to the file without a specific line
+
+Get owner/repo with: `gh repo view --json nameWithOwner --jq '.nameWithOwner'`
+
+**(c) Skip:** Do not post. End the review.
+
+**Cleanup:** After posting (options a or b), delete temporary files: `rm -f /tmp/review-payload.json`.
+
+---
+
+## Exit checklist
+
+Before delivering the verdict, verify each item:
+
+1. All applicable dimensions reviewed for every modified file (check against scope filter)
+2. Multi-commit history checked (if PR has >3 commits)
+3. Every finding has file:line, problem, impact, and proposed solution
+4. Findings organized by severity (blockers first)
+5. No secrets or sensitive data exposed in the review text itself
+6. Findings tagged `[VERIFY]` where runtime context cannot be confirmed statically
+7. Verdict assigned (APPROVE / APPROVE WITH CHANGES / REQUEST CHANGES / REJECT)
+8. If REQUEST CHANGES: each blocker is individually actionable
+9. If large PR (>30 files): category summary included. If >20 files (standalone): minor suggestions capped at 10
+10. Findings only cover changed lines and their immediate context (no pre-existing issues unless newly relevant)
+11. Duplicate patterns consolidated into single findings (per deduplication rule)
+12. If PR references linked issues (`Closes #X`), verify the PR actually resolves them
 
 ---
 
@@ -167,4 +466,8 @@ Same format as above.
 3. **Don't be complacent**: Phrases like "overall looks good" or "nice work" are only allowed if you genuinely found no significant problems after an exhaustive review.
 4. **Prioritize**: Blockers go first. Don't bury a security issue among 15 style suggestions.
 5. **Question the scope**: If the PR does more than it should, or mixes refactors with features, flag it.
-6. **Verify tests pass**: If you can run the tests, do it. If not, mentally trace whether they pass or fail.
+6. **Verify tests pass**: If blockers were found in logic (2.1) or tests (2.7), run relevant tests (matching modified files, not the full suite) to confirm findings. For PRs with only style, docs, or config changes, mental tracing is sufficient.
+7. **Noise control**: For standalone reviews of large PRs (>20 files), cap minor suggestions at 10 and summarize the count of suppressed suggestions. With `--team`, report ALL findings without caps.
+8. **Confidence tagging**: When a finding depends on runtime context that cannot be verified statically, tag it `[VERIFY]`. Do not present speculative findings as confirmed facts — but do not suppress them either.
+9. **Self-correction awareness**: Before reporting a finding on a multi-commit PR, check if the code was modified in a later commit within the same PR. Do not report issues that were already self-corrected.
+10. **Diff-only focus**: Review changed lines and their immediate context. Do not report pre-existing issues in unchanged code unless the PR makes them newly relevant.

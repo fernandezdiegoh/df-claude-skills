@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### pr-review v2.1.0
+- Added scope filtering: `full` (default), `security`, `performance`, `tests`, `architecture`, `quick` (blockers+recommended only, standalone)
+- Added GitHub integration (Step 4): post review as summary or with inline comments via `gh api`
+- Added dimension 2.11: database migrations and schema review (idempotency, zero-downtime, rollback, indexes)
+- Added mandatory progress reporting throughout the review process
+- Added exit checklist (12 verification items before delivering verdict)
+- Added tool preference section (Glob/Grep/Read over bash, `gh` CLI for GitHub)
+- Added large PR strategy (>30 files): category grouping, priority-based review order, minor suggestion cap
+- Added `[VERIFY]` confidence tag for findings requiring runtime verification
+- Added self-correction detection for multi-commit PRs (skip issues fixed in later commits)
+- Added consolidation PR support: read linked PR descriptions via `gh pr view`
+- Lowered multi-commit analysis threshold from 10 to 3 commits
+- Added verdict definitions (APPROVE, APPROVE WITH CHANGES, REQUEST CHANGES, REJECT)
+- Added `--team` flag: explicit agent-team mode (SendMessage delivery, GitHub write prohibition, no-cap rule for findings)
+- Added 5 new execution rules (noise control, confidence tagging, self-correction, GitHub etiquette, agent-team awareness)
+- Tests dimension (2.7): only flag missing tests as blocker when PR modifies logic (not docs/config/style)
+- Added `architecture` scope (2.1 + 2.2 + 2.3 + 2.5 + 2.8) for refactor PRs
+- Added finding deduplication: repeated patterns consolidated into single finding with all locations
+- Added env var check in 2.8: flag undocumented `os.environ`/`process.env` additions
+- Added GitHub API line mapping guidance: `line` is new-file line number, `subject_type: "file"` for non-diff lines
+- Added positional-flexible argument parsing (order doesn't matter)
+- Added draft PR awareness: adjusts tone while maintaining rigor
+- Renamed 2.9 to "Frontend performance": React-specific checks are conditional, universal checks for any framework
+- Added breaking changes sub-checks in 2.1 (signatures, responses, schemas, error formats)
+- Added escape hatch for >80 file PRs: warn user, note reduced coverage in summary
+- Lowered noise control threshold from >30 to >20 files
+- Added temp file cleanup after GitHub posting
+- Added accessibility sub-section in 2.9: alt text, ARIA, keyboard nav, semantic HTML
+- Added CI/CD security checks in 2.4: workflow secrets, GHA permissions, unpinned images, curl-pipe-sh
+- Added generated file skip guidance in Step 1: lock files, auto-generated types noted but not reviewed
+- Added trivial PR fast path: ≤3 files, ≤20 lines, docs/config/style → condensed review
+- Added multi-line inline comment support in Step 4 (`start_line` + `line` for ranges)
+- Improved execution rule 6: specific criteria for when to run tests vs mental trace
+- Improved hallucinated API check: grep node_modules/packages instead of "check docs"
+- Improved git log command in 1.1: limited to PR commit range to avoid slow `--follow` on large repos
+- Unified noise control threshold to >20 files across all references (was inconsistent >30/>20)
+- Added explicit diff strategy in Step 1: `gh pr diff`, Read tool fallback, `git diff` as last resort
+- Added PR number auto-detection from current branch via `gh pr list --head`
+- Added `docs/pr-reviews/` gitignore guidance (commit or ignore, project decides)
+- Added SSRF check in 2.4: flag unvalidated `fetch(userInput)` / `requests.get(url)` patterns
+- Added dependency vulnerability check in 2.8: `npm audit` / `pip-audit` for new deps
+- Added security exception for trivial PR fast path: auth/crypto/permissions files never qualify
+- Added re-review workflow: read previous review, track resolved/pending findings across iterations
+- Added CLAUDE.md integration: read project-specific rules to supplement default dimensions
+- Added linked issue verification: check `Closes #X` / `Fixes #X` actually resolve the referenced issue
+- Added cross-PR conflict detection in consolidation PRs: type/interface mismatches between merged PRs
+- Added draft PR TODO/FIXME tolerance: WIP markers are expected in drafts, not flagged as findings
+
 ### codebase-audit v3.8.0
 - Phase 7: full issue lifecycle — close resolved, update worsened/improved, keep unchanged, create new (was: dedup only)
 - Added CRITICAL rule: no background Bash commands during audit (bypass wait-for-completion, cause missing data)
