@@ -1,7 +1,7 @@
 ---
 name: documentation-expert
 description: Audit, create, and improve project documentation. Detects stale docs, missing coverage, and LLM-generated filler. Produces actionable docs that developers actually read.
-version: 2.0.0
+version: 2.2.0
 language: en
 category: docs
 ---
@@ -25,11 +25,24 @@ The user may request one of several modes:
 | Mode | What it does |
 |------|-------------|
 | `audit` | Assess existing docs: what's missing, what's stale, what's filler |
+| `summary` | Quick triage: health summary + top 5 findings, no writing |
 | `create <type>` | Write new documentation of a specific type (see types below) |
 | `improve <file>` | Rewrite or improve an existing doc |
 | `full` (default) | Audit + create/fix everything needed |
 
 If no mode is specified, default to `full`.
+
+**Invocation examples:**
+```
+/documentation-expert                        # full mode (audit + fix everything)
+/documentation-expert audit                  # assess only, don't write
+/documentation-expert summary                # quick health check, top 5 findings
+/documentation-expert create architecture    # write a new architecture doc
+/documentation-expert create ADR             # write a new ADR
+/documentation-expert improve docs/api.md    # rewrite an existing doc
+```
+
+The mode is the first word after the skill name. Everything after the mode word is the argument (type name or file path) — do not split it further.
 
 ---
 
@@ -51,31 +64,63 @@ Not all docs are the same. Use the right format for the job:
 
 ---
 
+## Tool preference
+
+**When running inside Claude Code, prefer built-in tools over bash:**
+- Use **Glob** (not `find`) for file discovery
+- Use **Grep** (not `grep`/`rg`) for content search
+- Use **Read** (not `cat`/`head`/`tail`) for reading files
+- Fall back to bash only for operations that require shell execution (e.g., `git log`)
+
+The bash examples in this skill are provided as reference for what to check, not as literal commands to run.
+
+---
+
 ## Process
 
 ### Phase 1: Audit existing documentation
 
-Before writing anything, map what exists:
+Before writing anything, map what exists.
 
-**Automated checks:**
+**Step 1 — Find all docs:**
 
-```bash
-# Find all markdown files
-find . -name "*.md" -not -path "*/node_modules/*" -not -path "*/.git/*" | sort
-
-# Find stale docs: markdown files not modified in 3+ months
-find . -name "*.md" -not -path "*/node_modules/*" -not -path "*/.git/*" -mtime +90
-
-# Find broken internal links (references to files that don't exist)
-grep -rn '\[.*\](\..*\.md' docs/ --include="*.md" | while read line; do
-  file=$(echo "$line" | grep -oP '\(\K[^)]+')
-  dir=$(dirname "$(echo "$line" | cut -d: -f1)")
-  [ ! -f "$dir/$file" ] && echo "BROKEN: $line"
-done
-
-# Find code references that may be outdated
-grep -rn '`[a-zA-Z_]*\.[a-z]*`\|`[a-zA-Z_]*()`' docs/ --include="*.md" | head -30
+Use Glob to find all markdown files:
 ```
+Glob: **/*.md (exclude node_modules, .git)
+```
+
+**Note on auto-generated docs:** If the project has auto-generated documentation (OpenAPI/Swagger, Typedoc, Storybook, JSDoc output), note them in the documentation map but do not audit their content — audit the generator config instead. Flag if the generator is misconfigured or the output is stale.
+
+**Step 2 — Check freshness via git (not filesystem mtime):**
+
+Filesystem `mtime` resets on `git checkout`. Use git history instead:
+```bash
+# Last meaningful edit date for a doc
+git log --format="%ai" -1 -- <file>
+
+# Docs not touched in 3+ months
+git ls-files -z '*.md' | while IFS= read -r -d '' f; do
+  last=$(git log --format="%ai" -1 -- "$f" | cut -d' ' -f1)
+  echo "$last $f"
+done | sort
+```
+
+**Step 3 — Find broken internal links:**
+
+Use Grep to find markdown links, then verify targets exist:
+```
+Grep: \[.*\]\(\..*\.md\)  (glob: *.md)
+```
+For each match, extract the target path and verify it exists with Glob.
+
+**Step 4 — Find code references that may be outdated:**
+
+Use Grep to find file path references in docs (require at least one `/` to avoid false positives like `v1.0` or `user.name`):
+```
+Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+`  (glob: *.md, in docs/)
+Grep: `[a-zA-Z_]+\(\)`              (glob: *.md, in docs/)
+```
+Cross-reference against actual file paths and function names in the codebase.
 
 **Manual assessment:**
 
@@ -101,6 +146,8 @@ For each doc found, evaluate:
 
 Statuses: `✅ current`, `⚠️ stale`, `⚠️ incomplete`, `❌ missing`, `🗑️ filler` (exists but adds no value).
 
+**In `summary` mode:** Stop here. Produce the health summary + documentation map + top 5 findings, then skip to the output format section.
+
 ---
 
 ### Phase 2: Detect documentation anti-patterns
@@ -111,7 +158,7 @@ Look for these problems, especially in LLM-generated docs:
 - Docs that paraphrase the code: "The `getUser` function gets a user" — adds zero value
 - Generic sections copied from templates that were never customized
 - "Overview" sections that just list the tech stack without explaining how things connect
-- Tables of contents for docs shorter than 50 lines
+- Tables of contents for short docs that don't need navigation
 
 #### 2.2 Outdated references
 - File paths that no longer exist
@@ -132,9 +179,42 @@ Look for these problems, especially in LLM-generated docs:
 - Duplicated information across multiple files (will drift out of sync)
 - Markdown formatting issues (broken tables, unclosed code blocks, wrong heading levels)
 
+#### 2.5 LLM-generated artifacts
+
+Watch for these telltale signs of AI-generated documentation:
+- **Throat-clearing phrases**: "Let's dive in", "It's worth noting that", "In this section we will...", "As mentioned above"
+- **Overly formal tone** inconsistent with the rest of the codebase docs
+- **Comprehensive-looking docs that say nothing**: every function listed, none explained
+- **Exhaustive tables** that list every file/function without explaining relationships or "why"
+- **"Overview" sections** that are just the tech stack listed as bullets with no architecture insight
+- **Redundant structure**: a heading, then a sentence that restates the heading, then the actual content
+- **False precision**: "This module handles exactly 3 responsibilities: ..." when the code tells a different story
+- **Hallucinated references**: file paths, function names, CLI flags, or config options that look plausible but don't exist in the codebase. Cross-check every concrete reference against the actual code.
+
+If a doc reads like a polished essay but doesn't help someone actually do their job, mark it as `🗑️ filler`.
+
+**Prioritize findings by impact:**
+1. Docs that block onboarding (README, quickstart, setup)
+2. Stale docs that actively cause bugs or confusion
+3. Missing docs for complex features with no other explanation
+4. Quality improvements for existing docs
+
+Use this priority order when deciding what to fix first in `full` mode, and when ordering the "Recommended priority" section in the audit report.
+
+#### Handling filler docs
+
+When you identify a `🗑️ filler` doc, recommend one of:
+- **Delete** — if it adds zero value and nobody references it
+- **Consolidate** — if its useful bits belong in another doc
+- **Rewrite** — if the topic is important but the current doc is useless
+
+Never leave a filler doc as-is without a recommended action.
+
 ---
 
 ### Phase 3: Write or improve documentation
+
+**In `audit` mode: skip this phase entirely.** Only produce the audit report.
 
 Follow these principles for every doc you write:
 
@@ -156,6 +236,8 @@ Follow these principles for every doc you write:
 
 8. **Date-stamp volatile content.** If something is likely to change (versions, URLs, specific configs), add a comment or note about when it was last verified.
 
+9. **Use diagrams for architecture.** A Mermaid diagram is worth more than 5 paragraphs of prose for explaining data flow, system boundaries, or request lifecycle. Prefer Mermaid (renders natively on GitHub). If the target platform doesn't support Mermaid (e.g., Bitbucket), fall back to ASCII art. Keep diagrams focused — one concept per diagram, split if you exceed ~15 nodes.
+
 #### Templates by type
 
 **README structure:**
@@ -167,7 +249,8 @@ One-line description of what this project does.
 ## Quickstart
 
 \`\`\`bash
-# Clone, install, run — 3 commands max
+# Show the minimal path to a running app.
+# If setup requires more than 3 commands, list them all but group into clear steps.
 \`\`\`
 
 ## What it does
@@ -181,6 +264,38 @@ How to set up, run tests, deploy.
 
 ## Configuration
 Required env vars with descriptions and examples.
+```
+
+**Architecture doc structure:**
+```markdown
+# Architecture
+
+## System overview
+
+[Mermaid diagram showing services, data stores, and external dependencies]
+
+\`\`\`mermaid
+graph LR
+  Client --> API
+  API --> DB[(Database)]
+  API --> Cache[(Redis)]
+  API --> External[External Service]
+\`\`\`
+
+## Key components
+For each major component:
+- What it does (1 sentence)
+- Where it lives (file paths)
+- Key design decisions and why
+
+## Data flow
+How a request moves through the system. Use a sequence diagram for complex flows.
+
+## Infrastructure
+How it's deployed, what services it depends on, environment differences.
+
+## Decisions
+Link to ADRs for major architectural choices, or list them inline if no ADR process exists.
 ```
 
 **Feature doc structure:**
@@ -221,29 +336,147 @@ What else did we consider and why didn't we choose it?
 What are the trade-offs? What becomes easier/harder?
 ```
 
+**Runbook structure:**
+```markdown
+# Runbook: [Incident/Task Name]
+
+**Last verified:** YYYY-MM-DD
+**On-call contact:** [team/person]
+
+## Symptoms
+How do you know this is happening? (alerts, error messages, user reports)
+
+## Diagnosis
+Step-by-step commands to confirm the issue and assess severity.
+
+## Resolution
+Step-by-step fix. Include exact commands, not just descriptions.
+
+## Rollback
+How to undo the fix if it makes things worse.
+
+## Prevention
+What would prevent this from happening again? Link to relevant ticket/ADR.
+```
+
+**CHANGELOG structure:**
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file.
+Format based on [Keep a Changelog](https://keepachangelog.com/).
+
+## [Unreleased]
+
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- New features
+
+### Changed
+- Changes to existing functionality
+
+### Fixed
+- Bug fixes
+
+### Removed
+- Removed features
+
+[Unreleased]: https://github.com/org/repo/compare/vX.Y.Z...HEAD
+[X.Y.Z]: https://github.com/org/repo/compare/vA.B.C...vX.Y.Z
+```
+
+**CLAUDE.md structure:**
+```markdown
+# Project instructions for Claude Code
+
+## About this project
+What the project does, tech stack, key architectural pattern (1-3 sentences).
+
+## Development commands
+\`\`\`bash
+# Install, run, test, lint — exact commands
+\`\`\`
+
+## Key rules
+Hard constraints Claude must follow (naming conventions, forbidden patterns,
+required checks before commit, etc.). Keep these short and unambiguous.
+
+## Common errors
+Things that break frequently and how to fix them. Format:
+### [Error description]
+- **Cause**: why it happens
+- **Fix**: exact steps
+
+## File structure
+Only include if the structure isn't obvious. Focus on "where to find X"
+rather than listing every directory.
+```
+
 ---
 
 ### Phase 4: Validate
 
-Before delivering, run these checks:
+Before delivering, run these automated checks:
 
-- [ ] All file paths and function names referenced in docs actually exist in the code
+**Verify referenced paths exist:**
+```
+Grep: `[a-zA-Z_./]+/[a-zA-Z_./]+`  (in docs/, glob: *.md)
+```
+For each backtick-quoted path found, use Glob to verify the file exists. Report any NOT FOUND.
+
+**Verify no placeholder content left:**
+```
+Grep: TODO|TBD|FIXME|PLACEHOLDER|describe.*here|add.*here  (glob: *.md, case-insensitive)
+```
+
+**Verify internal links resolve:**
+```
+Grep: \]\(\..*\.md\)  (glob: *.md)
+```
+Extract each target, resolve relative to the linking file's directory, verify with Glob.
+
+**Verify code examples are executable:**
+
+If docs contain shell commands (in bash/sh code blocks), spot-check that the commands exist and the flags are valid. For install/setup instructions, verify the referenced tools and package names are real.
+
+Then confirm manually:
+
 - [ ] All code examples are syntactically correct and use current APIs
-- [ ] All internal links between docs resolve correctly
-- [ ] No placeholder content left (TODO, TBD, "describe X here")
 - [ ] Each doc clearly states who it's for and what they'll learn
 - [ ] Setup/install instructions actually work if followed step by step
 - [ ] No duplicated content across docs (link instead)
 - [ ] Heading hierarchy is correct (no h3 under h1, etc.)
+- [ ] Diagrams (if any) match current architecture
 
 ---
 
 ## Output format
 
-When running in `audit` or `full` mode, produce a report:
+### Effort scale
+
+When estimating effort for findings, use this scale:
+- **~small** — under 30 minutes (add a section, fix a few references)
+- **~medium** — 1-2 hours (write a new doc from scratch, major rewrite)
+- **~large** — half day or more (architecture doc for complex system, full API reference)
+
+### Audit / summary report
+
+When running in `audit`, `summary`, or `full` mode, produce a report:
 
 ```markdown
 # Documentation audit: [Project Name]
+
+## Health summary
+
+| Metric | Value |
+|--------|-------|
+| **Documented areas** | N/M areas covered |
+| **Current docs** | N |
+| **Stale docs** | N |
+| **Missing docs** | N |
+| **Filler docs** | N |
+| **Overall health** | ✅ Good / ⚠️ Needs work / ❌ Critical gaps |
 
 ## Documentation map
 [Table from Phase 1]
@@ -251,22 +484,32 @@ When running in `audit` or `full` mode, produce a report:
 ## Findings
 
 ### Missing (should be created)
-- [ ] **<type>**: <description> — estimated effort
-- [ ] **<type>**: <description> — estimated effort
+- [ ] **<type>**: <description> — ~effort
 
 ### Stale (needs updating)
-- [ ] **<file>**: <what's outdated> — estimated effort
+- [ ] **<file>**: <what's outdated> — ~effort
 
 ### Filler (should be removed or rewritten)
-- [ ] **<file>**: <why it adds no value>
+- [ ] **<file>**: <why it adds no value> — recommended action: delete / consolidate / rewrite
 
 ### Improvements (existing docs that could be better)
-- [ ] **<file>**: <what to improve>
+- [ ] **<file>**: <what to improve> — ~effort
 
 ## Recommended priority
-1. [Most impactful missing doc]
-2. [Most dangerously stale doc]
-3. [Quick wins]
+1. [Highest impact — blocks onboarding or causes confusion]
+2. [Stale docs actively causing bugs]
+3. [Missing docs for complex features]
+4. [Quick wins]
+```
+
+**In `summary` mode:** Only produce the health summary, documentation map, and top 5 findings. Skip the full findings breakdown.
+
+**In `full` mode:** After the findings, add a section for changes made during the session:
+
+```markdown
+## Changes made
+- [x] **<file>**: <what was done>
+- [x] **<file>**: <what was done>
 ```
 
 When running in `create` or `improve` mode, produce the documentation directly as markdown files.
@@ -280,6 +523,8 @@ When running in `create` or `improve` mode, produce the documentation directly a
 3. **Don't pad.** If a project only needs a README and an architecture doc, don't create 10 docs for completeness. Write what's needed.
 4. **Match the project's voice.** If existing docs are casual, don't write formal prose. If they're technical, don't oversimplify.
 5. **Prefer updating over creating.** If a doc exists but is stale, update it rather than creating a parallel doc.
-6. **Link to code.** Use `file:line` references so readers can jump to the implementation.
+6. **Link to code.** Use `file:line` references so readers can jump to the source in their IDE or Claude Code. These are not clickable links in GitHub — they're navigation aids for development tools.
 7. **Flag what you can't verify.** If you can't confirm something (e.g., deployment steps you can't test), mark it with "⚠️ Unverified — last checked [date]".
 8. **Kill filler ruthlessly.** Delete sentences that don't add information. "This section describes the configuration options" before a table of configuration options is pure filler.
+9. **Co-locate when possible.** If a doc will go stale the moment the code changes, consider whether the information belongs as a code comment instead of a separate doc.
+10. **Know when NOT to write docs.** Not everything needs documentation. Skip docs for: trivial CRUD functions, thin wrappers around well-documented libraries, short-lived internal scripts, and projects small enough that a README covers everything. A missing doc is better than a useless doc.

@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### documentation-expert v2.2.0
+- Added `summary` mode for quick triage (health summary + top 5 findings, no writing)
+- Added hallucinated references detection to section 2.5 (plausible-looking paths/flags that don't exist)
+- Added explicit prioritization criteria (onboarding > bugs > complex features > quality)
+- Added filler doc handling guidance (delete / consolidate / rewrite)
+- Added CHANGELOG template (Keep a Changelog format)
+- Added effort scale definition (~small / ~medium / ~large)
+- Added "Changes made" section to full mode output
+- Added mode guards (skip Phase 3 in audit mode, stop at Phase 1 in summary mode)
+- Added docs-as-tests validation step in Phase 4 (verify shell commands are real)
+- Added execution rule 10: know when NOT to write docs
+- Added auto-generated docs guidance in Phase 1 (OpenAPI, Typedoc — audit config, not content)
+- Fixed regex to require `/` for path detection (avoids `v1.0`, `user.name` false positives)
+- Fixed freshness script to handle filenames with spaces (`git ls-files -z` + `read -d ''`)
+- Fixed argument parsing docs (everything after mode word is the full argument)
+- Fixed README template ("3 commands max" → "group into clear steps" for complex setups)
+- Fixed Mermaid guidance (added Bitbucket fallback note, ~15 node limit)
+- Fixed `file:line` rule clarification (IDE/Claude Code navigation, not GitHub links)
+- Removed arbitrary "50 lines" threshold for TOC filler detection
+
+### documentation-expert v2.1.0
+- Fixed Phase 1 bash scripts for macOS (`grep -oP` doesn't exist, `find -mtime` doesn't work with Git)
+- Replaced raw bash commands with Claude Code tool references (Glob, Grep, Read)
+- Added Tool preference section explaining when to use built-in tools vs bash
+- Added invocation examples to Scope section (how to pass modes)
+- Added section 2.5: LLM-generated artifacts detection (throat-clearing, false precision, redundant structure)
+- Added templates for Architecture (with Mermaid diagram), Runbook, and CLAUDE.md
+- Added writing rule 9: use Mermaid diagrams for architecture docs
+- Added health summary table to audit output format
+- Made Phase 4 validation partially automated (path verification, placeholder detection, link resolution)
+- Fixed broken regex in Phase 1 (missing closing parenthesis in link pattern)
+- Added execution rule 9: co-locate docs with code when they'd go stale quickly
+
 ### documentation-expert v2.0.0
 - Full rewrite from generic template to comprehensive documentation skill
 - Added modes: audit, create, improve, full (default)
