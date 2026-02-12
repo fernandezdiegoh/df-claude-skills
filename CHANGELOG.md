@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### codebase-audit v3.8.0
+- Phase 7: full issue lifecycle — close resolved, update worsened/improved, keep unchanged, create new (was: dedup only)
+- Added CRITICAL rule: no background Bash commands during audit (bypass wait-for-completion, cause missing data)
+- Added stable ID preservation rule: persist IDs across audits for existing findings, only new IDs for new findings
+- Added residual work tracking: IMPROVED findings with closed issues get a new issue for remaining work
+- Added note: reconcile mode only updates the report, not GitHub issues
+
 ### codebase-audit v3.7.0
 - Added `diff` scope: audit only files changed since last audit date (from YAML metrics)
 - Added `subagent_type` selection: `general-purpose` for Group 1 (needs Bash), `Explore` for Group 2 (read-only)

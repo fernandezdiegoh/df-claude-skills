@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.7.0
+version: 3.8.0
 language: en
 category: audit
 ---
@@ -97,6 +97,8 @@ Final (sequential): Phase 6 (tech debt consolidation) + Report writing + Phase 7
 **Subagent type:** Use `subagent_type="general-purpose"` for all subagents. All phases need to write their results to `/tmp/audit-phase-N.md` (requires Write tool), and Group 1 phases also need Bash for linters, git, and dep audit.
 
 **CRITICAL: Do NOT start report consolidation until every subagent has completed.** Read each Task Output and confirm completion. If a subagent is still running, wait for it. A premature report will be missing findings.
+
+**CRITICAL: Do NOT use background Bash commands (`run_in_background`) during the audit.** All work must run as foreground subagents (Task tool) or foreground Bash commands. Background commands bypass the wait-for-completion mechanism and their results will be missing from the report. If a check is slow (e.g., `npx license-checker`), include it inside the subagent that owns that phase — never launch it as a separate background process.
 
 **Phase 2.5 consolidation:** Phase 2's dependency vulnerability findings (2.5) overlap with Phase 0's dep audit. Consolidate both into a single section during report writing — don't duplicate findings.
 
@@ -250,6 +252,8 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
 ```
 
 **Time estimate:** ~5-10 minutes depending on number of open findings.
+
+**Note:** Reconcile mode only updates the report. To sync GitHub issues (close resolved, update changed), run a full audit with Phase 7, or manually close resolved issues.
 
 ---
 
@@ -583,7 +587,29 @@ gh label create "medium" --description "Medium severity" --color "fbca04" 2>/dev
 gh label create "low" --description "Low severity" --color "0e8a16" 2>/dev/null || true
 ```
 
-**Before creating issues, check for existing duplicates.** Run `gh issue list --label audit --state open` and compare open audit issues against the findings to create. Skip any finding already covered by an open issue (note it in the summary as "already tracked in #N").
+**Before creating issues, reconcile existing audit issues.** Run `gh issue list --label audit --state open` to get all open audit issues. Then compare each open issue against the current audit findings:
+
+1. **RESOLVED findings** → Close the issue with a comment explaining the resolution (e.g., "Resolved in PR #179 — PyMuPDF replaced with pypdf"). Use `gh issue close <number> --comment "..."`.
+2. **WORSENED findings** → Add a comment to the existing issue with the updated severity and new context. Update the issue labels if severity changed (e.g., remove `low`, add `high`). Use `gh issue edit <number> --add-label <new> --remove-label <old>` and `gh issue comment <number> --body "..."`.
+3. **IMPROVED findings** → Add a comment noting the improvement. Update labels if severity changed downward.
+4. **PERSISTS unchanged** → Leave as-is, no action needed.
+5. **NEW findings** → Create new issues (see below).
+
+Present the reconciliation summary to the user before executing:
+
+```
+Issue reconciliation:
+- Close: #157 (H-2 RESOLVED), #170 (M-11 RESOLVED)
+- Update: #162 (M-1 IMPROVED, locks added), #174 (L-1 → H-7 WORSENED)
+- Keep: #158, #159, #160, ... (13 unchanged)
+- Create: 17 new findings (2 HIGH, 5 MEDIUM, 10 LOW)
+
+Proceed? [severities to create for new findings]
+```
+
+Do not close, update, or create issues without user authorization.
+
+**Residual work from closed issues:** If a finding is IMPROVED (not RESOLVED) and its original issue is already closed, the closed issue's scope was fulfilled but work remains. Create a **new issue** for the residual work — do not reopen the old one. Include a reference to the old issue for context (e.g., "Continues from #156 which addressed startup validation. Remaining: crypto.py still encrypts with insecure key").
 
 **Then, group related findings.** Scan all findings in the selected severities and merge those that share the same root cause or fix into a single issue. Criteria for grouping:
 - Same fix pattern applied to multiple locations (e.g., H-1 + H-2 both need `asyncio.Lock` on global state → one issue)
@@ -845,4 +871,4 @@ Before delivering the report, verify each item:
 8. **Compare with state of the art**: Briefly mention if there are best practices or tools the project should adopt, with links when possible.
 9. **Distrust "clean" code**: LLM-generated code tends to look well-structured and tidy, but that doesn't guarantee correctness. Verify every assumption, every import, every method call.
 10. **Parallelize with subagents**: Use the execution strategy to maintain quality in later phases. Don't sacrifice depth due to context limitations.
-11. **Stable IDs**: Use IDs (C-1, H-3, M-7, L-2) for each finding so future audits can reference and track resolution.
+11. **Stable IDs**: Use IDs (C-1, H-3, M-7, L-2) for each finding so future audits can reference and track resolution. **ID stability across audits:** When assigning IDs in a new audit, preserve IDs from the previous audit for findings that PERSIST, IMPROVE, or WORSEN. Only assign new sequential IDs to genuinely NEW findings. Use the "Progress vs. previous audit" table (section 2) as the authoritative mapping. This is critical for Phase 7 issue reconciliation — changing IDs breaks the mapping between GitHub issues and findings.

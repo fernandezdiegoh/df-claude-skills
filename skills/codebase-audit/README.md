@@ -103,6 +103,21 @@ When a previous audit exists, the report includes a comparison table with regres
 Summary: 14 resolved, 8 persist, 1 worsened, 11 new. Trend: improving.
 ```
 
+### Issue reconciliation (Phase 7)
+
+When open audit issues exist, Phase 7 reconciles them before creating new ones:
+
+```
+Issue reconciliation:
+- Close: #157 (H-2 RESOLVED — PyMuPDF replaced with pypdf in PR #179)
+- Update: #162 (M-1 IMPROVED — singleton locks added, 5 globals remain)
+- Update: #170 (M-11 RESOLVED, M-15 persists — update title, comment resolution)
+- Keep: #158, #159, #160, ... (15 unchanged)
+- Create: 13 new findings (2 HIGH, 5 MEDIUM, 6 LOW)
+
+Proceed? [severities to create for new findings]
+```
+
 ### GitHub issue (self-contained, with grouped findings)
 
 Related findings are merged into a single issue. Each issue includes enough context to implement without reading the full audit:
@@ -200,6 +215,7 @@ Lightweight verification (~5-10 min) that checks whether existing findings have 
 
 | Version | Changes |
 |---------|---------|
+| 3.8.0 | Full issue lifecycle (close resolved, update changed, create new), no background Bash rule, stable ID preservation across audits, residual work tracking for closed issues, reconcile↔issues gap documented |
 | 3.7.0 | Diff scope, >100k LOC sampling, finding→issue backlinks, expanded YAML metrics, [STATIC-ONLY] tag, Phase 0 parallelization, reconcile refreshes test inventory, `latest.md` protected from partial overwrites, Phase 6 moved to sequential consolidation, `diff:YYYY-MM-DD` override, quick scope includes security skim, BRE regex fix |
 | 3.6.0 | Quick scope, simplified bus factor, subagent failure handling, duration metrics, improved docstring regex, nested fence fix, Phase 3.7 merged into Phase 3 subagent, date-based issue temp dirs |
 | 3.5.0 | License compliance, secret scanning tools, issue dedup, reconcile file handling, dep pinning, maturity rubric, critical file definition, bus factor improvements, LOC-based time estimates, WORSENED highlighting, body-file issues, all-severity issue creation |
