@@ -1,7 +1,7 @@
 ---
 name: documentation-expert
 description: Audit, create, and improve project documentation. Detects stale docs, missing coverage, and LLM-generated filler. Produces actionable docs that developers actually read.
-version: 2.3.0
+version: 3.0.0
 language: en
 category: docs
 ---
@@ -29,6 +29,9 @@ The user may request one of several modes:
 | `validate` | Run Phase 4 checks only (broken links, stale refs, placeholders) |
 | `create <type>` | Write new documentation of a specific type (see types below) |
 | `improve <file>` | Rewrite or improve an existing doc |
+| `diff` | Audit docs likely affected by recent code changes (compares git history to doc references) |
+| `reconcile` | Verify if previous audit findings have been resolved — no full scan, just check old findings |
+| `scope:<path>` | Audit docs within a specific directory only (e.g., `scope:docs/api/` for a monorepo service) |
 | `full` (default) | Audit + create/fix everything needed |
 
 If no mode is specified, default to `full`.
@@ -39,12 +42,49 @@ If no mode is specified, default to `full`.
 /documentation-expert audit                  # assess only, don't write
 /documentation-expert summary                # quick health check, top 5 findings
 /documentation-expert validate               # check links, refs, placeholders only
+/documentation-expert diff                   # what docs are stale from recent code changes?
+/documentation-expert diff:7                 # changes in last 7 days (default: 30)
+/documentation-expert reconcile              # check if previous findings are resolved
+/documentation-expert scope:services/auth/   # audit only docs related to auth service
 /documentation-expert create architecture    # write a new architecture doc
 /documentation-expert create ADR             # write a new ADR
 /documentation-expert improve docs/api.md    # rewrite an existing doc
 ```
 
-The mode is the first word after the skill name. Everything after the mode word is the argument (type name or file path) — do not split it further.
+**Argument parsing:** The mode is the first word after the skill name. Everything after the mode word is the argument (type name, file path, or parameter like `diff:7`). For parametric modes, the value follows the colon: `diff:7`, `scope:services/auth/`.
+
+---
+
+## Progress reporting
+
+Print mandatory progress lines so the user can track what's happening. These are their only visibility into your work.
+
+**Launch indicator** — print when starting a phase:
+```
+⏳ Phase 1: scanning and mapping documentation...
+```
+
+**Completion indicator** — print IMMEDIATELY after completing a phase, before starting the next:
+```
+✓ Phase 1 complete — 14 docs mapped (8 current, 3 stale, 2 missing, 1 filler)
+✓ Phase 2 complete — 7 anti-patterns found (2 filler, 3 stale refs, 2 LLM artifacts)
+✓ Phase 3 complete — 4 docs written, 2 improved
+✓ Phase 4 complete — all paths verified, 1 broken link fixed
+✓ Phase 5 complete — 3 issues created, 1 closed, 1 updated
+```
+
+Include quantified metrics in every completion line — not just "done".
+
+### Expected duration
+
+| Project size | Markdown files | Approximate time |
+|-------------|----------------|-----------------|
+| Small (<20 docs) | ≤20 | ~10 min |
+| Medium (20-50 docs) | 20-50 | ~20 min |
+| Large (50-100 docs) | 50-100 | ~35 min |
+| Very large (100+) | 100+ | ~50 min |
+
+These are estimates for `full` mode. `audit`, `summary`, `diff`, and `reconcile` are faster (no writing phase). `scope:<path>` scales with the scoped directory size, not the total.
 
 ---
 
@@ -78,7 +118,151 @@ The bash examples in this skill are provided as reference for what to check, not
 
 ---
 
+## Before starting: previous audits
+
+Before running any `audit`, `full`, `diff`, or `reconcile` mode, check for a previous audit:
+
+1. Look for `docs/doc-audits/latest.md`
+2. If not found, check for legacy `docs/DOC-DEBT.md`
+3. If found, read it completely
+
+When a previous audit exists, include a "Changes since last audit" section in the report:
+
+```markdown
+## Changes since last audit (YYYY-MM-DD)
+
+| Finding | Previous | Current | Status |
+|---------|----------|---------|--------|
+| Missing API docs | P1 | — | ✅ Resolved |
+| Stale architecture.md | P2 | P3 | ⬆️ Improved |
+| README missing quickstart | — | P1 | 🆕 New |
+| Filler in deployment.md | P3 | P3 | ➡️ Persists |
+```
+
+Valid statuses: ✅ Resolved, ⬆️ Improved, 🆕 New, ➡️ Persists, ⬇️ Worsened.
+
+If no previous audit exists, state it: "No previous audit found. This is the baseline."
+
+---
+
 ## Process
+
+### Reconcile mode (`reconcile`)
+
+Lightweight verification of previous audit findings — no full scan.
+
+**Requires a previous audit.** If `docs/doc-audits/latest.md` doesn't exist, abort with: "No previous audit found. Run `full` or `audit` first."
+
+**Step 1 — Load previous findings:**
+
+Read `docs/doc-audits/latest.md` and extract every finding (location, problem, priority).
+
+**Step 2 — Spot-check each finding:**
+
+For each previous finding, verify if it's been addressed:
+- **Missing doc findings:** Check if the file now exists (Glob).
+- **Stale doc findings:** Check if the file was modified since the audit date (`git log --format="%ai" -1 -- <file>`). If modified, re-read and verify the specific issue was fixed.
+- **Filler doc findings:** Check if the file was deleted or modified. If modified, spot-check if the filler was removed.
+- **Improvement findings:** Check if the file was modified and the specific issue was addressed.
+
+**Step 3 — Produce reconciliation report:**
+
+Output ONLY the comparison table — no documentation map, no full findings breakdown:
+
+```markdown
+# Documentation reconcile: [Project Name]
+
+## Finding status (vs. audit of YYYY-MM-DD)
+
+| Finding | Previous | Current | Status |
+|---------|----------|---------|--------|
+| Missing API docs | P1 | — | ✅ Resolved |
+| Stale architecture.md | P2 | P3 | ⬆️ Improved |
+| README missing quickstart | P1 | — | ✅ Resolved |
+| Filler in deployment.md | P3 | P2 | ⬇️ Worsened |
+| Orphan runbook | P4 | P4 | ➡️ Persists |
+
+**Resolved:** 2/5 (40%) · **Improved:** 1/5 (20%) · **Persists:** 1/5 (20%) · **Worsened:** 1/5 (20%)
+```
+
+Save as `docs/doc-audits/YYYY-MM-DD-reconcile.md`.
+
+**Update latest.md:** After reconciliation, update `docs/doc-audits/latest.md` to reflect current status:
+- **✅ Resolved:** Add `~~strikethrough~~` to the finding and append `— RESOLVED (YYYY-MM-DD)`.
+- **⬆️ Improved:** Update the priority level in the finding heading (e.g., `[P1]` → `[P3]`) and append `— IMPROVED (YYYY-MM-DD)`.
+- **⬇️ Worsened:** Update the priority level and append `— WORSENED (YYYY-MM-DD)`.
+- **➡️ Persists:** No change needed.
+
+Refresh the YAML metrics block at the bottom of `latest.md` with updated counts.
+
+---
+
+### Scope mode (`scope:<path>`)
+
+Audit only documentation within or related to a specific directory.
+
+**Step 1 — Resolve scope:**
+
+The path after `scope:` is the target directory (e.g., `services/auth/`, `docs/api/`). Verify it exists.
+
+**Step 2 — Scoped discovery:**
+
+- Find markdown files within the scoped path: `Glob: <path>/**/*.md`
+- Find markdown files elsewhere that reference files in the scoped path (Grep for the path in all `*.md`)
+- Combine both sets as the scoped doc universe
+
+**Step 3 — Run standard phases on scoped set:**
+
+Scope mode is **read-only by default** (like `audit`). It does not write or modify docs.
+
+- Phase 1: Audit only the scoped docs (not the full project)
+- Phase 2: Anti-pattern checks on scoped docs only
+- Phase 3: **Skip** (scope mode is assessment-only)
+- Phase 4: Validate scoped docs
+
+**Previous audit comparison for scope:** Do NOT compare against `latest.md` (which is a full audit). Instead, look for a previous scope audit of the same path: `docs/doc-audits/*-scope-<full-path>.md`. Only compare against a matching scope. If no previous scope audit exists for this path, state: "No previous scope audit found for `<path>`. This is the baseline."
+
+**Report:** Same format as `audit`, but the health summary and documentation map cover only the scoped set. State the scope clearly: "Scope: `services/auth/` (5 of 42 total docs)."
+
+Save as `docs/doc-audits/YYYY-MM-DD-scope-<full-path>.md`. Do not overwrite `latest.md`. The `<full-path>` uses dashes instead of slashes (e.g., `services/auth/` → `scope-services-auth`).
+
+---
+
+### Diff mode (`diff` / `diff:N`)
+
+When invoked with `diff` or `diff:N` (where N is days, default 30):
+
+**Step 1 — Find recently changed source files:**
+```bash
+git log --since="N days ago" --name-only --pretty=format:"" | sort -u
+```
+
+**Step 2 — Find docs that reference changed files:**
+
+For each changed source file, search docs for references to its path or the functions/classes it exports:
+```
+Grep: <filename or exported symbol>  (glob: *.md)
+```
+
+**Step 3 — Flag and assess:**
+
+Mark matching docs as "potentially stale" and run:
+- Phase 1 assessment ONLY on flagged docs (not full scan)
+- Phase 2 anti-pattern checks ONLY on flagged docs
+- Phase 4 validation on flagged docs
+- Skip Phase 3 (diff mode is assessment-only, like `audit`)
+
+**Step 4 — Report with causation:**
+
+Include which code changes triggered which doc flags, so the user understands the connection:
+```markdown
+| Changed file | Docs referencing it | Likely stale? |
+|-------------|--------------------|----|
+| `src/api/auth.ts` | `docs/api.md`, `README.md` | ⚠️ Yes — auth flow rewritten |
+| `src/utils/format.ts` | (none) | — |
+```
+
+---
 
 ### Phase 1: Audit existing documentation
 
@@ -91,7 +275,14 @@ Use Glob to find all markdown files:
 Glob: **/*.md (exclude node_modules, .git)
 ```
 
-**Note on auto-generated docs:** If the project has auto-generated documentation (OpenAPI/Swagger, Typedoc, Storybook, JSDoc output), note them in the documentation map but do not audit their content — audit the generator config instead. Flag if the generator is misconfigured or the output is stale.
+**Note on auto-generated docs:** If the project has auto-generated documentation (OpenAPI/Swagger, Typedoc, Storybook, JSDoc output), note them in the documentation map but do not audit their content — audit the generator config instead.
+
+When auditing a doc generator config, check:
+- **Spec version:** Is the OpenAPI spec version current (e.g., 3.1 vs 2.0)? Is the spec file tracked in git?
+- **Endpoint coverage:** Compare routes defined in code vs routes in the spec. Flag missing endpoints.
+- **Output freshness:** Compare the last modification date of generated output vs the source code it documents. If source changed after the last generation, output is stale.
+- **Build integration:** Is doc generation part of the build/CI pipeline, or does someone run it manually? Manual generation = likely stale.
+- **Config completeness:** Are descriptions, examples, and error responses populated, or are they empty/auto-generated placeholders?
 
 **Step 2 — Check freshness via git (not filesystem mtime):**
 
@@ -146,11 +337,24 @@ For each doc found, evaluate:
 | CLAUDE.md | claude-md | ✅ current | 2026-02-09 | Well-maintained |
 ```
 
-Statuses: `✅ current`, `⚠️ stale`, `⚠️ incomplete`, `❌ missing`, `🗑️ filler` (exists but adds no value).
+Statuses: `✅ current`, `⚠️ stale`, `⚠️ incomplete`, `❌ missing`, `🗑️ filler` (exists but adds no value), `🔗 orphan` (no other doc links to it).
 
 **Step 5 — Find orphan docs:**
 
-Build a graph of internal links between docs. Identify markdown files that no other doc links to. Entry points (README.md, CLAUDE.md, CHANGELOG.md) are exempt — they're discovered by convention, not links. Other orphan docs are likely unread and candidates for deletion or linking.
+Build a link graph between docs:
+
+1. For each markdown file, extract all internal links: `Grep: \[.*\]\(.*\.md\)` in each file
+2. Build a set of "linked-to" files
+3. Compare against all discovered markdown files
+4. Entry points exempt from orphan detection: `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `LICENSE.md`, `CONTRIBUTING.md` (discovered by convention)
+5. Any non-exempt file not linked to by any other doc is an orphan
+
+For each orphan, assess and recommend:
+- **Delete** — if the content is outdated or duplicated elsewhere
+- **Link** — if the content is valuable but undiscoverable. Suggest where to add a link (usually README or a parent doc)
+- **Consolidate** — if the content belongs in another existing doc
+
+Mark orphans in the documentation map with the `🔗 orphan` status.
 
 **Step 6 — Scan for undocumented environment variables:**
 
@@ -159,6 +363,8 @@ Search the codebase for env var usage patterns:
 Grep: process\.env\.|os\.environ|os\.getenv|settings\.|env\(  (in source code, not docs)
 ```
 Compare against documented env vars (in README, `.env.example`, or a config doc). Flag any variables used in code but not documented anywhere.
+
+**Note:** codebase-audit (if used on the same project) also checks for undocumented env vars in its Phase 4.5. If both skills produce findings for the same variables, the documentation-expert finding takes precedence for the remediation action (write the docs), while codebase-audit addresses the code-side concern (e.g., missing defaults, validation).
 
 **In `summary` mode:** Limit Phase 1 to top-level markdown files and `docs/` first level only — do not recurse into deep subdirectories. Produce the health summary + documentation map + top 5 findings, then skip to the output format section.
 
@@ -465,6 +671,80 @@ Then confirm manually:
 - [ ] Heading hierarchy is correct (no h3 under h1, etc.)
 - [ ] Diagrams (if any) match current architecture
 
+**CI integration recommendation:**
+
+If the project has CI/CD but no doc validation in the pipeline, flag it as a finding. Suggest automating:
+- **Broken link checks** — tools like `markdown-link-check` or `lychee` in CI catch broken links on every PR
+- **Doc freshness checks** — compare `git log` dates of source files vs docs that reference them; alert when source is newer
+- **Placeholder detection** — grep for `TODO`/`TBD`/`PLACEHOLDER` in docs during CI
+
+Frame this as a P3 finding: "No CI validation for documentation — broken links and stale docs won't be caught until the next manual audit."
+
+---
+
+### Phase 5: GitHub issues (optional)
+
+After completing the audit, offer to create GitHub issues for the findings. Only proceed if the user confirms.
+
+**Step 1 — Check for existing doc issues:**
+```bash
+gh issue list --label doc-debt --state open
+```
+
+If the label doesn't exist, create it: `gh label create doc-debt --description "Documentation debt" --color "0075ca"`.
+
+**Step 2 — Reconcile findings with existing issues:**
+
+For each existing open issue with `doc-debt` label:
+- If the finding is ✅ Resolved → close the issue with a comment: "Resolved in doc audit of YYYY-MM-DD."
+- If the finding ⬆️ Improved (e.g., P1 → P3) → update the issue title with the new priority, add a comment noting the improvement. If improved to P4, add label `low-priority` and leave open (still has pending work).
+- If the finding ➡️ Persists → leave as-is
+- If the finding ⬇️ Worsened → update the issue title with the new priority, add a comment with the escalation details
+
+**Step 3 — Create issues for new/persisting findings:**
+
+First, present a summary and let the user choose which priorities to create issues for:
+
+```
+Found 7 findings: 1 P1, 2 P2, 3 P3, 1 P4.
+Create issues for which priorities? (e.g., "all", "P1+P2", "P1 only")
+```
+
+Before creating issues, group related findings that share the same fix (e.g., "update all file paths in docs/architecture.md") into a single issue. List all related findings in the issue body.
+
+For each issue (grouped or individual), write the issue body to a temp file using the **Write tool** (not bash echo/cat), then create the issue:
+
+```bash
+# First: Write tool → /tmp/doc-issue-1.md (with the body content below)
+# Then:
+gh issue create --title "[P<N>] <finding title>" --label doc-debt --body-file /tmp/doc-issue-1.md
+```
+
+Issue body template:
+```markdown
+## Context
+Found in documentation audit of YYYY-MM-DD.
+
+## Problem
+<problem description from finding>
+
+## Impact
+<impact description from finding>
+
+## Suggested fix
+<action from finding>
+
+## Effort estimate
+<effort from finding>
+
+## Acceptance criteria
+- [ ] <specific, verifiable criteria>
+```
+
+**Step 4 — Backlink in report:**
+
+For each finding that has a GitHub issue, append `**Tracked in:** #<issue-number>` to the finding in the report.
+
 ---
 
 ## Output format
@@ -476,9 +756,34 @@ When estimating effort for findings, use this scale:
 - **~medium** — 1-2 hours (write a simple feature doc or runbook, rewrite a stale doc)
 - **~large** — half day or more (architecture doc for a multi-service system, comprehensive API reference, full CLAUDE.md from scratch)
 
-### Audit / summary report
+### Priority levels
 
-When running in `audit`, `summary`, or `full` mode, produce a report:
+Use these levels in finding headings to indicate impact:
+
+| Priority | Meaning | When to use |
+|----------|---------|-------------|
+| **P1 — Blocks onboarding** | Someone can't start working without this | Missing README, broken setup instructions, no quickstart |
+| **P2 — Causes confusion** | Active source of bugs or wasted time | Stale docs with wrong info, outdated architecture diagrams |
+| **P3 — Missing coverage** | Gap that forces people to read source code | Undocumented complex features, missing API docs |
+| **P4 — Polish** | Would be nice but nobody is blocked | Formatting issues, minor improvements, orphan docs |
+
+### Health grade
+
+Use objective criteria to assign the overall health grade. Count P1-P4 findings and the current-doc percentage to determine the grade.
+
+**Current-doc percentage** = `current / (current + stale + missing + filler)` — the denominator is everything inventoried in Phase 1 (existing docs by status + identified missing docs). Orphan docs count as their underlying status (current, stale, etc.).
+
+| Grade | Criteria |
+|-------|----------|
+| **✅ Good** | 0 P1, ≤1 P2, >80% docs current |
+| **⚠️ Needs work** | ≤1 P1, ≤3 P2, >50% docs current |
+| **❌ Critical gaps** | 2+ P1, or >3 P2, or <50% docs current |
+
+Apply the worst matching grade. If the project has 0 P1 and 1 P2 but only 40% current docs, the grade is ❌ Critical gaps.
+
+### Audit / summary / diff report
+
+When running in `audit`, `summary`, `diff`, or `full` mode, produce a report:
 
 ```markdown
 # Documentation audit: [Project Name]
@@ -494,31 +799,56 @@ When running in `audit`, `summary`, or `full` mode, produce a report:
 | **Filler docs** | N |
 | **Overall health** | ✅ Good / ⚠️ Needs work / ❌ Critical gaps |
 
+## Changes since last audit (YYYY-MM-DD)
+[Comparison table — omit if no previous audit exists]
+
 ## Documentation map
 [Table from Phase 1]
 
 ## Findings
 
-### Missing (should be created)
-- [ ] **<type>**: <description> — ~effort
+Group findings by category (Missing / Stale / Filler / Improvements). Each finding must be self-contained:
 
-### Stale (needs updating)
-- [ ] **<file>**: <what's outdated> — ~effort
+### Missing
 
-### Filler (should be removed or rewritten)
-- [ ] **<file>**: <why it adds no value> — recommended action: delete / consolidate / rewrite
+#### [P1 — Blocks onboarding] No API documentation
+- **Location:** `docs/` (doesn't exist yet) — related code: `src/api/routes/`
+- **Problem:** 12 API endpoints with no documentation. Integrators have to read source code.
+- **Impact:** Blocks external integrators and slows onboarding for new team members.
+- **Action:** Create `docs/api.md` using the API reference template.
+- **Effort:** ~large
 
-### Improvements (existing docs that could be better)
-- [ ] **<file>**: <what to improve> — ~effort
+### Stale
 
-## Recommended priority
-1. [Highest impact — blocks onboarding or causes confusion]
-2. [Stale docs actively causing bugs]
-3. [Missing docs for complex features]
-4. [Quick wins]
+#### [P2 — Causes confusion] Architecture doc references old module structure
+- **Location:** `docs/architecture.md` (last updated 2025-11-03)
+- **Problem:** References `src/services/` which was renamed to `src/modules/` in December.
+- **Impact:** New hires follow wrong file paths; causes confusion during onboarding.
+- **Action:** Update all file path references and the Mermaid diagram.
+- **Effort:** ~small
+
+### Filler
+
+#### [P4 — Polish] Generated API table adds no value
+- **Location:** `docs/endpoints.md`
+- **Problem:** Lists every endpoint in a table without explaining auth, error codes, or usage patterns.
+- **Impact:** Looks complete but integrators still need to read the source code.
+- **Action:** Delete. Replace with real API docs (see Missing findings above).
+- **Effort:** ~small
+
+### Improvements
+
+#### [P3 — Missing coverage] README missing troubleshooting section
+- **Location:** `README.md`
+- **Problem:** Common setup errors (port conflicts, missing env vars) not documented.
+- **Impact:** Developers hit the same issues repeatedly and ask in Slack.
+- **Action:** Add a "Common errors" section with the 3 most frequent issues.
+- **Effort:** ~small
 ```
 
-**In `summary` mode:** Only produce the health summary, documentation map, and top 5 findings. Skip the full findings breakdown.
+**In `summary` mode:** Only produce the health summary, documentation map, and top 5 findings (structured format, not full breakdown). Skip the category grouping.
+
+**In `diff` mode:** Replace the documentation map with the code-changes-to-docs causation table (see Diff mode section). Only include findings for flagged docs.
 
 **In `full` mode:** After the findings, add a section for changes made during the session:
 
@@ -528,11 +858,137 @@ When running in `audit`, `summary`, or `full` mode, produce a report:
 - [x] **<file>**: <what was done>
 ```
 
-**Tracking doc debt:** If the project has unresolved findings after the audit, offer to save the report as `docs/DOC-DEBT.md`. This serves as a lightweight tracker — findings are checkboxes that can be ticked off as they're addressed. Remove the file when all items are resolved.
+**Tracking doc debt:** If the project has unresolved findings after the audit, offer to save the report as `docs/DOC-DEBT.md`. This serves as a lightweight tracker — findings can be ticked off as they're addressed. Remove the file when all items are resolved.
 
-When running in `create` or `improve` mode, produce the documentation directly as markdown files.
+When running in `create` or `improve` mode, produce the documentation directly as markdown files. No report.
 
 **In `validate` mode:** Produce only the automated check results (broken paths, placeholders, broken links, invalid commands). No documentation map, no findings breakdown.
+
+### Tracking metrics
+
+End every audit/full/diff report with a YAML metrics block. This block is machine-readable and enables automated comparison across audits.
+
+```yaml
+# doc-audit-metrics
+date: YYYY-MM-DD
+version: "<use version from this skill's frontmatter>"
+mode: full
+grade: "✅ Good"
+docs:
+  total: N
+  current: N
+  stale: N
+  missing: N
+  filler: N
+  orphan: N
+findings:
+  p1: N
+  p2: N
+  p3: N
+  p4: N
+resolved_since_last: N
+new_since_last: N
+issues_created: N
+issues_closed: N
+env_vars:
+  documented: N
+  undocumented: N
+```
+
+Do NOT omit or manually edit this block. Fill every field based on actual counts from the audit. Set `resolved_since_last`, `new_since_last`, `issues_created`, and `issues_closed` to 0 when not applicable.
+
+---
+
+## Report storage
+
+Save audit reports for historical tracking:
+
+```
+docs/doc-audits/
+├── 2026-02-13.md              # full audit
+├── 2026-02-13-diff.md         # diff mode
+├── 2026-02-14-audit.md        # audit-only mode
+└── latest.md                  # most recent full audit (overwritten)
+```
+
+**Rules:**
+- `full` mode: save as `YYYY-MM-DD.md` AND overwrite `latest.md`
+- `audit`, `diff`, `validate`, `summary`: save as `YYYY-MM-DD-<mode>.md` only (do not overwrite `latest.md`)
+- `create` / `improve`: no report saved (these modes write docs directly)
+- Create `docs/doc-audits/` if it doesn't exist
+- `docs/DOC-DEBT.md` remains available as a complementary lightweight tracker
+- `reconcile` mode: save as `YYYY-MM-DD-reconcile.md` only
+- `scope:<path>` mode: save as `YYYY-MM-DD-scope-<full-path>.md` only
+
+---
+
+## Execution strategy
+
+### Parallelization
+
+Phase 2 depends on Phase 1's output (it needs to know which docs exist to check for anti-patterns). They cannot run in parallel. Instead, parallelize Phase 3 writing across multiple docs:
+
+```
+Sequential: Phase 1 (scan/map) — must run first
+Sequential: Phase 2 (anti-patterns) — needs Phase 1's doc map
+Parallel:   Phase 3 (write/improve) — individual docs are independent, fan out with subagents
+  → WAIT for all
+Sequential: Phase 4 (validate) — needs Phase 3 output
+Optional:   Phase 5 (GitHub issues) — needs complete report
+```
+
+**When to parallelize Phase 3:** Only in `full` mode when 3+ docs need writing/improvement. Each subagent handles one doc or a small group of related docs.
+
+**Subagent rules:**
+- Subagent type: `general-purpose` (needs Read, Grep, Glob, Write, Bash for git)
+- Each subagent receives: the doc type, the template, relevant source files, and the writing rules
+- Each subagent writes its doc directly to the target path and returns a one-line summary
+- WAIT for all subagents before starting Phase 4
+- If a subagent fails, note the error and continue with available results
+
+For modes that don't write (`audit`, `summary`, `diff`, `reconcile`, `validate`) or small projects (<3 docs to write): run everything sequentially.
+
+### Checkpoints
+
+After completing each phase, save a checkpoint to enable recovery if the session is interrupted:
+
+```
+docs/.doc-audit-checkpoint.md  (gitignored, temporary)
+```
+
+The checkpoint file contains:
+- Current mode and scope
+- Phase completion status
+- Phase 1 output (documentation map)
+- Phase 2 output (anti-pattern findings)
+- Partial Phase 3 results (if interrupted mid-write)
+
+**Recovery:** At the start of an audit, check for `docs/.doc-audit-checkpoint.md`. If found, ask the user: "Found an incomplete audit checkpoint from [date]. Resume from Phase [N], or start fresh?" On resume, skip completed phases and use their cached results.
+
+**Cleanup:** Delete the checkpoint file after the final report is saved. Add `docs/.doc-audit-checkpoint.md` to `.gitignore` if it's not already there.
+
+---
+
+## Exit checklist
+
+Before delivering the final report, verify:
+
+1. All markdown files scanned and mapped (Phase 1)
+2. Git used for freshness checks (not filesystem mtime)
+3. Anti-patterns checked including LLM artifacts (Phase 2)
+4. Every finding has location, problem, impact, action, and effort
+5. Findings prioritized (P1 > P2 > P3 > P4)
+6. Previous audit compared (or stated none exists)
+7. Health grade assigned using objective criteria (see Health grade table)
+8. Writing rules followed for all created/improved docs (Phase 3)
+9. All referenced file paths verified against codebase (Phase 4)
+10. All internal links verified (Phase 4)
+11. No placeholder content left in written docs (Phase 4)
+12. YAML metrics block filled completely and accurately (including `issues_created`/`issues_closed` if Phase 5 ran)
+13. GitHub issues created correctly with backlinks in report (Phase 5, if applicable)
+14. Report saved with correct naming convention
+15. Checkpoint and temp files cleaned up (`docs/.doc-audit-checkpoint.md`, `/tmp/doc-issue-*`)
+16. Unverified claims marked with `⚠️ Unverified`
 
 ---
 
@@ -548,3 +1004,7 @@ When running in `create` or `improve` mode, produce the documentation directly a
 8. **Kill filler ruthlessly.** Delete sentences that don't add information. "This section describes the configuration options" before a table of configuration options is pure filler.
 9. **Co-locate when possible.** If a doc will go stale the moment the code changes, consider whether the information belongs as a code comment instead of a separate doc.
 10. **Know when NOT to write docs.** Not everything needs documentation. Skip docs for: trivial CRUD functions, thin wrappers around well-documented libraries, short-lived internal scripts, and projects small enough that a README covers everything. A missing doc is better than a useless doc.
+11. **Show progress.** Print launch and completion lines for every phase. The user can't see your work otherwise — progress lines are their only visibility into what's happening.
+12. **Mark uncertainty.** Use `⚠️ Unverified` consistently for any claim you cannot confirm without running the code (setup instructions, external URLs, runtime behavior). Don't guess — flag it.
+13. **Wait for subagents.** When parallelizing Phase 3, wait for ALL subagents to return before proceeding to Phase 4.
+14. **Clean up.** Delete `docs/.doc-audit-checkpoint.md` and `/tmp/doc-issue-*.md` temp files after the final report is delivered.

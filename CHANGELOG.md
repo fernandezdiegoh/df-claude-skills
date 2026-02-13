@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### documentation-expert v3.0.0
+- Added `reconcile` mode: lightweight verification of previous audit findings without full scan
+- Added `scope:<path>` mode: audit docs within a specific directory (monorepo-friendly)
+- Added `diff` mode: audit only docs affected by recent code changes (`diff` for 30 days, `diff:N` for custom)
+- Added Phase 5: optional GitHub issue generation with `doc-debt` label, reconciliation of existing issues, and finding grouping
+- Added structured findings format: each finding has location, problem, impact, action, and effort (replaces flat checkboxes)
+- Added priority labels P1–P4 (Blocks onboarding / Causes confusion / Missing coverage / Polish) in finding headings
+- Added objective health grading rubric: ✅ Good / ⚠️ Needs work / ❌ Critical gaps with concrete P1/P2/current-doc thresholds
+- Added YAML metrics block at end of every report for automated cross-audit comparison
+- Added report storage: saves audit reports to `docs/doc-audits/` with dated files and `latest.md` for full audits
+- Added previous audit comparison: tracks resolved, improved, new, persisting, and worsened findings across audits
+- Added parallelization: Phase 3 writing fans out across subagents when 3+ docs need work
+- Added checkpoint/recovery: saves progress to `docs/.doc-audit-checkpoint.md` after each phase for session recovery
+- Added progress reporting: mandatory `⏳ launching` and `✓ complete` lines with quantified metrics after each phase
+- Added expected duration table by project size (small ~10 min, large ~50 min)
+- Added exit checklist: 16-point quality gate before delivering the final report
+- Added CI integration recommendations: broken link checks, doc freshness, placeholder detection
+- Added OpenAPI/Swagger audit guidance: spec version, endpoint coverage, output freshness, build integration
+- Added detailed orphan doc detection: link graph construction, actionable recommendations (delete/link/consolidate)
+- Added env var scanning overlap note with codebase-audit for cross-skill awareness
+- Added execution rules 11-14: show progress, mark uncertainty, wait for subagents, clean up temp files
+
 ### pr-review v2.1.0
 - Added scope filtering: `full` (default), `security`, `performance`, `tests`, `architecture`, `quick` (blockers+recommended only, standalone)
 - Added GitHub integration (Step 4): post review as summary or with inline comments via `gh api`
