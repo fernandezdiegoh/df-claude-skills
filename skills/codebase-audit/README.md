@@ -185,7 +185,7 @@ Lightweight verification that checks existing findings without a full audit:
 
 ## Reconcile mode
 
-Lightweight verification (~5-10 min) that checks whether existing findings have been resolved without running a full audit. Updates `latest.md` in place and saves a `YYYY-MM-DD-reconcile.md` snapshot. Handles renamed and deleted files.
+Lightweight verification (~5-10 min) that checks whether existing findings have been resolved without running a full audit. Updates `latest.md` in place and saves a `YYYY-MM-DD-reconcile.md` snapshot. Handles renamed files, deleted files, and PR-based resolutions (checks closing PRs via `gh` before reopening).
 
 ## Phases
 
@@ -215,6 +215,7 @@ Lightweight verification (~5-10 min) that checks whether existing findings have 
 
 | Version | Changes |
 |---------|---------|
+| 3.8.1 | Reconcile checks PR-based resolutions before reopening findings (reads closing PRs, evaluates fix, confirms not reverted) |
 | 3.8.0 | Full issue lifecycle (close resolved, update changed, create new), no background Bash rule, stable ID preservation across audits, residual work tracking for closed issues, reconcile↔issues gap documented |
 | 3.7.0 | Diff scope, >100k LOC sampling, finding→issue backlinks, expanded YAML metrics, [STATIC-ONLY] tag, Phase 0 parallelization, reconcile refreshes test inventory, `latest.md` protected from partial overwrites, Phase 6 moved to sequential consolidation, `diff:YYYY-MM-DD` override, quick scope includes security skim, BRE regex fix |
 | 3.6.0 | Quick scope, simplified bus factor, subagent failure handling, duration metrics, improved docstring regex, nested fence fix, Phase 3.7 merged into Phase 3 subagent, date-based issue temp dirs |

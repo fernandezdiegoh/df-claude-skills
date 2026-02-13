@@ -74,6 +74,10 @@ All notable changes to this project will be documented in this file.
 - Added cross-PR conflict detection in consolidation PRs: type/interface mismatches between merged PRs
 - Added draft PR TODO/FIXME tolerance: WIP markers are expected in drafts, not flagged as findings
 
+### codebase-audit v3.8.1
+- Reconcile mode now checks PR-based resolutions before reopening findings: reads closing PRs via `gh pr diff`, evaluates if the fix addresses the root cause, and confirms it wasn't reverted
+- Reconcile summary examples now show all resolution patterns (PR, file, commit)
+
 ### codebase-audit v3.8.0
 - Phase 7: full issue lifecycle — close resolved, update worsened/improved, keep unchanged, create new (was: dedup only)
 - Added CRITICAL rule: no background Bash commands during audit (bypass wait-for-completion, cause missing data)

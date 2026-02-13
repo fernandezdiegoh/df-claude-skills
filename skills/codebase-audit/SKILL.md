@@ -1,7 +1,7 @@
 ---
 name: codebase-audit
 description: Full codebase audit — architecture, security, tech debt, and actionable remediation roadmap. Optimized to catch LLM-generated code issues.
-version: 3.8.0
+version: 3.8.1
 language: en
 category: audit
 ---
@@ -215,6 +215,11 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
 3. **Verify each finding against the codebase.** For each finding that is not already marked RESOLVED:
    - Read the referenced file and line(s)
    - If the file no longer exists, check for renames (`git log --follow --diff-filter=R -- <old-path>`). If deleted, mark as RESOLVED with note "file removed". If renamed, update the location and continue verification at the new path.
+   - **Check for PR-based resolution before reopening.** If the finding has a `Tracked in: #N` backlink, check the issue state: `gh issue view <N> --json state,closedByPullRequests`. If the issue is closed and `closedByPullRequests` is non-empty:
+     1. For each closing PR, read its diff: `gh pr diff <PR_NUMBER>`
+     2. Evaluate whether the PR's changes actually address the root cause described in the finding — not just whether the code around the finding changed, but whether the specific problem is fixed.
+     3. If the PR fix covers the problem **and the fix is still present in the current code** (i.e., the PR was not reverted) → mark as `RESOLVED` with note "fixed in PR #N" and move to the next finding. Do not second-guess a targeted fix just because the surrounding code still looks complex.
+     4. If the PR changes are unrelated to the finding, or the fix is incomplete and the problem genuinely persists in the current code despite the PR → continue with normal verification below.
    - Check if the reported problem still exists
    - Determine status: `RESOLVED`, `PERSISTS`, `IMPROVED`, `WORSENED`
    - For RESOLVED: verify the fix is correct, not just that the code changed. Read the new code and confirm it addresses the root cause — a refactored function that still has the same vulnerability is not resolved.
@@ -241,8 +246,9 @@ When the scope is `reconcile`, skip the full audit process. Instead, verify whet
 | WORSENED | N |
 
 ### Resolved
-- ~~C-1: SQL injection in search endpoint~~ — fixed in `retriever.py:42`
-- ~~M-3: Missing input validation~~ — added in commit `abc1234`
+- ~~C-1: SQL injection in search endpoint~~ — fixed in PR #179
+- ~~M-3: Missing input validation~~ — fixed in `retriever.py:42`
+- ~~L-2: Hardcoded timeout~~ — added in commit `abc1234`
 
 ### Changed
 - H-5: CORS wildcard → IMPROVED (now scoped to specific origins)
