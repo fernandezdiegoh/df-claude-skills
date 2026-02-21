@@ -6,10 +6,12 @@ Custom skills for Claude Code. Optimized to detect patterns in LLM-generated cod
 
 | Skill | Description | Version |
 |-------|-------------|---------|
-| [`codebase-audit`](skills/codebase-audit/) | Full audit — architecture, security, tech debt, remediation roadmap | 3.8.0 |
+| [`codebase-audit`](skills/codebase-audit/) | Full audit — architecture, security, tech debt, remediation roadmap | 3.8.1 |
 | [`pr-review`](skills/pr-review/) | Rigorous PR review, assumes problems exist until proven otherwise | 2.1.0 |
 | [`frontend-design`](skills/frontend-design/) | Distinctive, production-grade frontend interfaces | 1.0.0 |
 | [`documentation-expert`](skills/documentation-expert/) | Audit, create, and improve docs — detects stale content and LLM filler | 3.0.0 |
+| [`rag-repo-architect`](skills/rag-repo-architect/) | Analyze and optimize repo structure for RAG ingestion | 1.0.0 |
+| [`rag-systemprompt-engineer`](skills/rag-systemprompt-engineer/) | Audit, iterate, and generate system prompts for RAG assistants | 1.0.0 |
 
 ## Installation
 
@@ -71,3 +73,5 @@ From Claude Code, invoke with `/<skill-name>`:
 - `/codebase-audit` — full codebase audit
 - `/frontend-design` — design and build frontend interfaces
 - `/documentation-expert` — create or improve documentation
+- `/rag-repo-architect` — audit a repo's structure for RAG ingestion
+- `/rag-systemprompt-engineer` — audit or generate system prompts for RAG assistants
