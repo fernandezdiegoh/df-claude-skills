@@ -12,6 +12,7 @@ Custom skills for Claude Code. Optimized to detect patterns in LLM-generated cod
 | [`documentation-expert`](skills/documentation-expert/) | Audit, create, and improve docs — detects stale content and LLM filler | 3.0.0 |
 | [`rag-repo-architect`](skills/rag-repo-architect/) | Analyze and optimize repo structure for RAG ingestion | 1.0.0 |
 | [`rag-systemprompt-engineer`](skills/rag-systemprompt-engineer/) | Audit, iterate, and generate system prompts for RAG assistants | 1.0.0 |
+| [`claudemd-engineer`](skills/claudemd-engineer/) | Audit, iterate, and generate Claude Code instruction ecosystems (CLAUDE.md + rules + hooks) | 1.0.0 |
 
 ## Installation
 
@@ -75,3 +76,4 @@ From Claude Code, invoke with `/<skill-name>`:
 - `/documentation-expert` — create or improve documentation
 - `/rag-repo-architect` — audit a repo's structure for RAG ingestion
 - `/rag-systemprompt-engineer` — audit or generate system prompts for RAG assistants
+- `/claudemd-engineer` — audit, iterate, or generate Claude Code instruction ecosystems
